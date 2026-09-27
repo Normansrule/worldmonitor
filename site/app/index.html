@@ -1,0 +1,104 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-only
+     Terra Atlas — an educational, static fork of World Monitor (github.com/koala73/worldmonitor, © 2024-2026 Elie Habib).
+     Source code for this page: see the "About and sources" panel or the repository README. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Terra Atlas — a 3D Earth to explore and learn from</title>
+  <meta name="description" content="A zoomable 3D Earth with live earthquakes, natural events, satellites, aurora, day and night, plate tectonics and World Monitor's infrastructure layers — plus guided tours, a geography quiz and a measuring tool." />
+  <meta name="theme-color" content="#081827" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%230c2136' stroke='%23e3b55b' stroke-width='4'/%3E%3Cpath d='M8 32h48M32 4c10 9 10 47 0 56M32 4c-10 9-10 47 0 56' stroke='%237ed6c4' stroke-width='3' fill='none'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/atlas.css" />
+  <link rel="manifest" href="../manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="../icons/icon-192.png" />
+</head>
+<body>
+  <div id="globe" aria-label="Interactive 3D globe. Drag to rotate, scroll or pinch to zoom." role="application"></div>
+
+  <header class="topbar">
+    <a class="brand" href="#" id="brand" title="Back to the whole Earth">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="27" /><path d="M5 32h54M32 5c11 9 11 45 0 54M32 5c-11 9-11 45 0 54" /></svg>
+      <span>Terra Atlas</span>
+    </a>
+    <form class="search" id="search" role="search">
+      <label class="sr" for="q">Search places and layers</label>
+      <input id="q" type="search" autocomplete="off" placeholder="Search a place, cable, port…  ( / )" />
+      <ul id="results" class="results" role="listbox" hidden></ul>
+    </form>
+    <nav class="modes" aria-label="Modes">
+      <button data-mode="tours" aria-pressed="false">Tours</button>
+      <button data-mode="quiz" aria-pressed="false">Quiz</button>
+      <button data-mode="measure" aria-pressed="false">Measure</button>
+      <button data-mode="about" aria-pressed="false">About</button>
+      <a class="navlink" href="../learn/">Lessons</a>
+      <a class="navlink" href="../">Home</a>
+    </nav>
+  </header>
+
+  <aside class="panel layers" id="layers" aria-label="Layers">
+    <div class="panel-head"><h2>Layers</h2><button class="icon" data-close="layers" aria-label="Close layers">×</button></div>
+    <div id="layer-list"></div>
+  </aside>
+
+  <aside class="panel notes" id="notes" aria-live="polite" aria-label="Field notes">
+    <div class="panel-head"><h2 id="notes-title">Field notes</h2><button class="icon" data-close="notes" aria-label="Close field notes">×</button></div>
+    <div id="notes-body"></div>
+  </aside>
+
+  <footer class="bottombar">
+    <div class="readout" id="readout" aria-live="off">
+      <span id="ro-lat">—</span><span id="ro-lng">—</span><span id="ro-alt">—</span>
+    </div>
+    <div class="clock" id="clock" title="Coordinated Universal Time"></div>
+    <div class="basemaps" role="radiogroup" aria-label="Base map">
+      <button data-base="daynight" role="radio">Day/night</button>
+      <button data-base="bluemarble" role="radio">Relief</button>
+      <button data-base="gibs" role="radio" title="Yesterday's Earth from NASA's VIIRS instrument">NASA daily</button>
+      <button data-base="imagery" role="radio">Satellite</button>
+      <button data-base="streets" role="radio">Streets</button>
+      <button data-base="night" role="radio">City lights</button>
+    </div>
+    <label class="gibs-pick" id="gibs-pick" hidden>Date <input type="date" id="gibs-date-input" min="2012-01-19" /></label>
+    <div class="looks" role="radiogroup" aria-label="Sensor look">
+      <button data-look="normal" role="radio" title="Normal (1)">Normal</button>
+      <button data-look="nvg" role="radio" title="Night vision (2)">NVG</button>
+      <button data-look="flir" role="radio" title="Thermal (3)">Thermal</button>
+      <button data-look="crt" role="radio" title="CRT screen (4)">CRT</button>
+    </div>
+    <div class="tools">
+      <label class="toggle" title="Switch to high-resolution tiles automatically when you zoom close"><input type="checkbox" id="autodetail" checked /> Auto detail</label>
+      <button class="icon" id="spin" title="Auto-rotate (R)" aria-pressed="false">⟳</button>
+      <button class="icon" id="shot" title="Save a picture of the globe">⤓</button>
+      <button class="icon mobile-only" id="open-layers" title="Layers">≡</button>
+    </div>
+    <div class="attribution" id="attribution"></div>
+  </footer>
+
+  <div class="loading" id="loading"><div class="ring"></div><p>Loading the Earth…</p></div>
+  <noscript><p class="noscript">Terra Atlas needs JavaScript and WebGL to draw the globe.</p></noscript>
+
+  <!-- Sensor looks: SVG colour filters applied to the globe canvas -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <filter id="look-flir" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="0.30 0.59 0.11 0 0  0.30 0.59 0.11 0 0  0.30 0.59 0.11 0 0  0 0 0 1 0" />
+      <feComponentTransfer>
+        <feFuncR type="table" tableValues="0 0.15 0.55 0.85 1 1 1" />
+        <feFuncG type="table" tableValues="0 0 0.05 0.3 0.6 0.85 1" />
+        <feFuncB type="table" tableValues="0.05 0.35 0.55 0.25 0 0.15 0.9" />
+      </feComponentTransfer>
+    </filter>
+    <filter id="look-nvg" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="0.1 0.2 0.05 0 0  0.35 0.75 0.2 0 0.03  0.08 0.15 0.05 0 0  0 0 0 1 0" />
+      <feComponentTransfer><feFuncG type="gamma" amplitude="1.5" exponent="0.75" offset="0" /></feComponentTransfer>
+    </filter>
+  </svg>
+  <div class="look-overlay" aria-hidden="true"></div>
+  <script type="module" src="js/main.js"></script>
+  <script>if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('../sw.js');</script>
+</body>
+</html>

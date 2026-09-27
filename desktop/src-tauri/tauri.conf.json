@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Terra Atlas",
+  "version": "1.0.0",
+  "identifier": "io.github.normansrule.terraatlas",
+  "build": { "frontendDist": "../../site" },
+  "app": {
+    "windows": [
+      { "title": "Terra Atlas", "url": "app/index.html", "width": 1440, "height": 900, "minWidth": 900, "minHeight": 600, "backgroundColor": "#081827" }
+    ],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Education",
+    "shortDescription": "A living 3D Earth to explore and learn from",
+    "longDescription": "Terra Atlas is an educational 3D globe with live earthquakes, natural events, satellites, aurora, aircraft and World Monitor's infrastructure layers, plus guided tours, lessons, a geography quiz and a fluid-dynamics lab.",
+    "copyright": "Copyright (C) 2026 Aleksander Norman; based on World Monitor, Copyright (C) 2024-2026 Elie Habib. AGPL-3.0-only.",
+    "licenseFile": "../../LICENSE",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+  }
+}
