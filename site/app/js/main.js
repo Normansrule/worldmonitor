@@ -10,6 +10,13 @@ import * as astro from './astro.js';
 import { SOURCES } from './sources.js';
 import { TOURS } from './tours.js';
 import { Quiz, buildQuestionPool } from './quiz.js';
+import { flightsLayer, flightState, layoutPlanes, deckAction } from './flights.js';
+import { camerasLayer, alprLayer, stopCameraMedia, alprRow } from './cameras.js';
+import { citiesLayer, airportsLayer } from './places.js';
+import { installNavigation } from './nav.js';
+import { ICONS } from './icons.js';
+import { orbitOf } from './layers.js';
+import { passes } from './satellites.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -48,8 +55,8 @@ const defaultMaterial = globe.globeMaterial();
 const loader = new THREE.TextureLoader();
 const dayNightMaterial = new THREE.ShaderMaterial({
   uniforms: {
-    dayTexture: { value: loader.load('textures/earth-blue-marble.jpg') },
-    nightTexture: { value: loader.load('textures/earth-night.jpg') },
+    dayTexture: { value: loader.load('textures/earth-blue-marble-2k.jpg') },
+    nightTexture: { value: loader.load('textures/earth-night-2k.jpg') },
     sunDir: { value: new THREE.Vector3(1, 0, 0) },
   },
   vertexShader: `
@@ -91,11 +98,24 @@ function updateSun() {
   dayNightMaterial.uniforms.sunDir.value.set(c.x, c.y, c.z).normalize();
 }
 
+// Radii and line widths in globe.gl are angles on the sphere, so a 0.5° cable is 55 km wide.
+// Scaling them with the camera height keeps markers and lines the same size on screen at every zoom.
+let zkAlt = 2.4;
+const zk = () => Math.max(0.0002, Math.min(1, zkAlt / 2.2));
+function applyZoomScale(force = false) {
+  const a = state.pov.altitude;
+  if (!force && Math.abs(Math.log(a / zkAlt)) < 0.3) return;
+  zkAlt = a;
+  globe.pointRadius((d) => d.r * Math.max(zk(), 0.02 * (d.minR ?? 0)))
+    .pathStroke((d) => (d.stroke == null ? null : d.stroke * zk()))
+    .arcStroke((d) => (d.stroke == null ? null : d.stroke * zk()))
+    .ringMaxRadius((d) => d.maxR * zk())
+    .labelSize((d) => d.size * (d.fixed ? 1 : Math.max(zk(), 0.35)));
+}
 const hex2rgb = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
 const val = (v, d) => (typeof v === 'function' ? v(d) : v);
 
 globe
-  .backgroundImageUrl('textures/night-sky.png')
   .showAtmosphere(true).atmosphereColor('#7fb6ff').atmosphereAltitude(0.16)
   // points
   .pointLat('lat').pointLng('lng').pointAltitude('alt').pointRadius('r').pointColor('color').pointLabel('tip')
@@ -141,12 +161,30 @@ globe
 setTimeout(() => $('#loading').classList.add('gone'), 8000);
 
 restylePolygons();
+zkAlt = state.pov.altitude; applyZoomScale(true);
 globe.scene().add(nightShade);
 const controls = globe.controls();
-controls.minDistance = R * 1.00025; // ≈1.6 km above the surface
-controls.maxDistance = R * 14;
 controls.autoRotateSpeed = 0.35;
-controls.enableDamping = true;
+globe.renderer().setPixelRatio(Math.min(devicePixelRatio, 1.75)); // 4K phones don't need 3× pixels for a globe
+const nav = installNavigation({ globe, R, $, reduceMotion, onLocate: (lat, lng) => { fly(lat, lng, 0.012); state.home = [lat, lng]; setTimeout(() => probeCard(lat, lng), 400); } });
+// Procedural star field (replaces a 900 kB background image).
+{
+  const n = 4000; const pos = new Float32Array(n * 3); const col = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const u = Math.random() * 2 - 1; const t = Math.random() * Math.PI * 2; const r = 6000 + Math.random() * 3000; const k = Math.sqrt(1 - u * u);
+    pos.set([r * k * Math.cos(t), r * u, r * k * Math.sin(t)], i * 3);
+    const b = 0.55 + Math.random() * 0.45; const warm = Math.random() < 0.25;
+    col.set([b, b * (warm ? 0.9 : 0.97), b * (warm ? 0.78 : 1)], i * 3);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  globe.scene().add(new THREE.Points(g, new THREE.PointsMaterial({ size: 1.6, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.85, depthWrite: false })));
+  globe.camera().far = Math.max(globe.camera().far, 12000); globe.camera().updateProjectionMatrix();
+}
+// Swap the quick 2K day/night textures for 4K ones once the page is idle.
+(window.requestIdleCallback ?? ((f) => setTimeout(f, 2500)))(() => {
+  loader.load('textures/earth-blue-marble.jpg', (t) => { dayNightMaterial.uniforms.dayTexture.value = t; });
+  loader.load('textures/earth-night.jpg', (t) => { dayNightMaterial.uniforms.nightTexture.value = t; });
+});
 window.addEventListener('resize', () => globe.width(innerWidth).height(innerHeight));
 
 function restylePolygons() {
@@ -182,9 +220,10 @@ function applyBase() {
 }
 
 // ------------------------------------------------------------------ layers: load + compose
-async function refreshLayer(id) {
+async function refreshLayer(id, { soft = false } = {}) {
   const l = layerById[id];
   if (!l || !state.on.has(id)) return;
+  if (soft && state.data[id]) { state.chan[id] = l.channels(state.data[id], ctx()); return compose(); }
   const first = !state.data[id];
   if (first) setLStatus(id, 'loading');
   try {
@@ -201,7 +240,11 @@ async function refreshLayer(id) {
   }
   compose();
 }
-const ctx = () => ({ now: new Date(), base: state.base, hover: state.hover, pov: state.pov, outlineMesh });
+const viewOf = (pov) => {
+  const a = pov.altitude; const horizon = Math.acos(1 / (1 + a)) * astro.R_EARTH_KM; // km to the horizon
+  return { lat: pov.lat, lng: pov.lng, altitude: a, radiusKm: Math.min(horizon, a * astro.R_EARTH_KM * 0.95 + 5) };
+};
+const ctx = () => ({ now: new Date(), base: state.base, hover: state.hover, pov: state.pov, view: viewOf(state.pov), outlineMesh, globe, THREE });
 
 const meshCache = {};
 function outlineMesh(key, features, color = 0xeef3f6, opacity = 0.3, alt = 0.004) {
@@ -237,7 +280,7 @@ function countryAt(lat, lng) {
 }
 
 function compose() {
-  const acc = { points: [], rings: [], paths: [], arcs: [], polygons: [], labels: [], particles: [], html: [], custom: [] };
+  const acc = { points: [], rings: [], paths: [], arcs: [], polygons: [], labels: [], particles: [], html: [], custom: [], pick: [] };
   for (const l of LAYERS) {
     if (!state.on.has(l.id)) continue;
     const ch = state.chan[l.id];
@@ -245,6 +288,7 @@ function compose() {
     for (const k of Object.keys(acc)) if (ch[k]) acc[k].push(...ch[k]);
   }
   for (const k of Object.keys(state.tool)) acc[k].push(...state.tool[k]);
+  makePins(acc);
   // Only hand globe.gl the channels whose contents actually changed — re-digesting
   // unchanged paths/polygons every tick is what makes globes stutter.
   for (const k of Object.keys(acc)) {
@@ -257,10 +301,37 @@ function compose() {
 }
 
 compose.last = {};
+
+// Icon pins: when you are close enough, the nearest markers of each layer turn into labelled map pins.
+const pinCache = new WeakMap();
+function makePins(acc) {
+  const v = viewOf(state.pov); document.body.classList.toggle('close', v.altitude < 0.025);
+  if (v.altitude > 1.1) return;
+  const keep = []; const pins = []; const perLayer = {};
+  const scored = acc.points.map((p) => ({ p, km: astro.haversineKm(v.lat, v.lng, p.lat, p.lng) }));
+  scored.sort((a, b) => a.km - b.km);
+  for (const { p, km } of scored) {
+    const l = p.ref && layerById[p.ref.layer];
+    const icon = l?.pin && (typeof l.pin === 'function' ? l.pin(p.ref.d) : l.pin);
+    if (!icon || km > v.radiusKm || pins.length >= 180 || (perLayer[l.id] = (perLayer[l.id] ?? 0) + 1) > 45) { keep.push(p); continue; }
+    let el = pinCache.get(p.ref.d);
+    if (!el) {
+      el = document.createElement('button'); el.className = 'pinx'; el.type = 'button';
+      el.style.setProperty('--c', p.color?.startsWith?.('#') ? p.color : l.swatch);
+      el.innerHTML = `<span class="g">${ICONS[icon] ?? ICONS.pin}</span><b>${esc(p.label ?? plainTip(p.tip))}</b>`;
+      el.addEventListener('click', (e) => { e.stopPropagation(); state.hitAt = performance.now(); select(p.ref); });
+      el.title = plainTip(p.tip);
+      pinCache.set(p.ref.d, el);
+    }
+    pins.push({ lat: p.lat, lng: p.lng, alt: p.alt ?? 0.005, el });
+  }
+  acc.points = keep; acc.html.push(...pins);
+}
+const plainTip = (t) => String(t ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
 const SETTERS = {
   points: (d) => globe.pointsData(d), rings: (d) => globe.ringsData(d), paths: (d) => globe.pathsData(d), arcs: (d) => globe.arcsData(d),
   polygons: (d) => globe.polygonsData(d), labels: (d) => globe.labelsData(d), particles: (d) => globe.particlesData(d),
-  html: (d) => globe.htmlElementsData(d), custom: (d) => globe.customLayerData(d),
+  html: (d) => globe.htmlElementsData(d), custom: (d) => globe.customLayerData(d), pick: () => {},
 };
 
 // Periodic refresh — each layer declares its own cadence.
@@ -323,26 +394,65 @@ function toggleLayer(id, on) {
 }
 
 // ------------------------------------------------------------------ field notes
-function openNotes(title, html) {
+function openNotes(title, html, key = null) {
+  stopCameraMedia();
+  state.notesKey = key;
+  if (!key?.startsWith('flight:')) { flightState.selected = null; flightState.follow = false; }
   $('#notes-title').textContent = title;
   $('#notes-body').innerHTML = html;
   $('#notes').classList.add('open');
   $('#notes-body').scrollTop = 0;
 }
-function closeNotes() { $('#notes').classList.remove('open'); }
+function closeNotes() { $('#notes').classList.remove('open'); stopCameraMedia(); state.notesKey = null; if (flightState.selected) { flightState.selected = null; flightState.follow = false; refreshLayer('aircraft', { soft: true }); } }
+const isOpen = (key) => state.notesKey === key && $('#notes').classList.contains('open');
 const linksHtml = (links) => (links?.length ? `<div class="links">${links.filter((l) => l.url).map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}</a>`).join('')}</div>` : '');
 const rowsHtml = (rows) => (rows?.length ? `<dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : '');
 const refsHtml = (ids) => `<ul class="sources">${ids.map((i) => SOURCES[i]).filter(Boolean).map((s) => `<li><a href="${s.url}" target="_blank" rel="noopener">${esc(s.name)}</a><small>${esc(s.license)}</small></li>`).join('')}</ul>`;
 
 function select(ref) {
   const l = layerById[ref.layer];
+  if (l?.open) return l.open(ref.d);
   if (!l?.describe) return showLearn(ref.layer);
   const c = l.describe(ref.d);
+  state.selected = ref;
+  const key = `sel:${ref.layer}:${c.title}`;
   openNotes(l.label, `
+    <div id="sel-wiki"></div>
     <h3>${esc(c.title)}</h3>${c.sub ? `<p class="sub">${esc(c.sub)}</p>` : ''}
-    ${rowsHtml(c.rows)}${c.body ? `<p>${esc(c.body)}</p>` : ''}${linksHtml(c.links)}
+    ${rowsHtml(c.rows)}${c.body ? `<p>${esc(c.body)}</p>` : ''}
+    ${c.actions?.length ? `<div class="row">${c.actions.map(([a, t]) => `<button class="btn ghost" data-action="${a}">${esc(t)}</button>`).join('')}</div><div id="sel-action"></div>` : ''}
+    ${linksHtml(c.links)}
+    ${c.probe ? `<h4>Here, right now</h4>${probeHtml(c.probe[0], c.probe[1])}` : ''}
     <h4>About this layer</h4><p>${esc(l.learn.what)}</p>
-    <button class="btn ghost" data-learn-more="${l.id}">How it is measured, and something to try</button>`);
+    <button class="btn ghost" data-learn-more="${l.id}">How it is measured, and something to try</button>`, key);
+  if (c.probe) fillProbe(c.probe[0], c.probe[1]);
+  if (c.wiki) wikiCard(c.wiki, key);
+}
+// Wikipedia summary + photo for named things (only exact article matches, never disambiguation pages).
+async function wikiCard(title, key) {
+  try {
+    const w = await getFeed('wikipedia', `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(String(title).replace(/ /g, '_'))}`, { ttl: 86_400_000 });
+    if (w.type !== 'standard' || !isOpen(key)) return;
+    $('#sel-wiki').innerHTML = `<figure class="wiki">${w.thumbnail ? `<img src="${esc(w.thumbnail.source)}" alt="" loading="lazy" />` : ''}<figcaption>${esc(w.extract)} <a href="${esc(w.content_urls?.desktop?.page)}" target="_blank" rel="noopener">Wikipedia</a></figcaption></figure>`;
+  } catch { /* no article, no card */ }
+}
+async function runAction(kind) {
+  const ref = state.selected; const out = $('#sel-action');
+  if (kind === 'orbit' && ref?.d?.sat) { orbitOf.sat = ref.d.sat; orbitOf.snapshot = ref.d.snapshot; toggleLayer('satellites', true); refreshLayer('satellites', { soft: true }); if (out) out.innerHTML = '<p class="muted">Orbit drawn in violet — one full revolution from now.</p>'; }
+  if (kind === 'passes' && ref?.d?.sat) {
+    if (ref.d.snapshot) { out.innerHTML = '<p class="err">Pass predictions need live orbital elements, and CelesTrak is unreachable right now.</p>'; return; }
+    out.innerHTML = '<p class="muted">Finding your location…</p>';
+    const go = (lat, lng) => {
+      const ps = passes(ref.d.sat, lat, lng, 48);
+      out.innerHTML = ps.length ? `<p>Next passes above 10° for ${astro.fmtLat(lat)}, ${astro.fmtLng(lng)}:</p><dl>${ps.map((p) => {
+        const dark = astro.solarElevation(lat, lng, p.maxAt) < -6;
+        return `<dt>${p.start.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}</dt><dd>up to ${Math.round(p.maxEl)}°, ${Math.max(1, Math.round((p.end - p.start) / 60000))} min${dark ? ' · sky dark — look for a moving star' : ' · daylight'}</dd>`;
+      }).join('')}</dl><p class="muted">Satellites are only visible when your sky is dark but they are still sunlit, usually within two hours of sunset or sunrise.</p>` : '<p>No passes above 10° in the next 48 hours from here.</p>';
+    };
+    if (state.home) return go(...state.home);
+    navigator.geolocation?.getCurrentPosition((p) => { state.home = [p.coords.latitude, p.coords.longitude]; go(...state.home); }, () => go(state.pov.lat, state.pov.lng));
+  }
+  if (kind === 'near-flights' && ref?.d) { state.opts.aircraft.scope = 'near'; delete state.data.aircraft; toggleLayer('aircraft', true); renderLayerPanel(); globe.pointOfView({ lat: ref.d.lat, lng: ref.d.lng, altitude: 0.08 }, reduceMotion ? 0 : 1500); }
 }
 function showLearn(id) {
   const l = layerById[id]; const st = state.lstatus[id];
@@ -355,6 +465,7 @@ function showLearn(id) {
     <h4>How it is measured</h4><p>${esc(l.learn.how)}</p>
     <h4>Try this</h4><p>${esc(l.learn.try)}</p>
     ${state.on.has(id) ? '' : `<p><button class="btn" data-enable="${id}">Show this layer</button></p>`}
+    ${id === 'alpr' ? '<p><button class="btn ghost" data-alpr-live="1">Load the latest for this area from OpenStreetMap</button></p>' : ''}
     <h4>Sources and further reading</h4>${refsHtml(l.learn.refs)}`);
 }
 $('#notes-body').addEventListener('click', (e) => {
@@ -368,6 +479,10 @@ $('#notes-body').addEventListener('click', (e) => {
   if (t.id === 'quiz-start' || t.id === 'quiz-again') startQuiz();
   if (t.id === 'quiz-next') nextQuestion();
   if (t.dataset.fly) { const [a, b, c] = t.dataset.fly.split(',').map(Number); fly(a, b, c); }
+  if (t.dataset.action) runAction(t.dataset.action);
+  if (t.dataset.deck) deckAction(t.dataset.deck, api);
+  if (t.dataset.cam) { const c = state.data.cameras?.cams.find((x) => x.id === t.dataset.cam); if (c) { select({ layer: 'cameras', d: c }); fly(c.lat, c.lng, Math.min(state.pov.altitude, 0.02)); } }
+  if (t.dataset.alprLive) layerById.alpr.fetchLive(viewOf(state.pov)).then((n) => { t.textContent = `Loaded ${n} from OpenStreetMap`; refreshLayer('alpr'); }).catch(() => { t.textContent = 'Overpass did not respond — try again shortly'; });
 });
 document.addEventListener('click', (e) => { if (e.target.closest('[data-open-about]')) { e.preventDefault(); setMode('about'); } });
 document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => {
@@ -376,6 +491,7 @@ document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('cli
 
 // ------------------------------------------------------------------ surface clicks: probe + country card
 function surfaceClick(lat, lng, country) {
+  if (performance.now() - (state.hitAt ?? 0) < 500) return;
   if (state.mode === 'measure') return measureClick(lat, lng);
   if (state.mode === 'quiz') return quizClick(lat, lng);
   if (state.mode === 'tours') return;
@@ -393,10 +509,19 @@ function probeHtml(lat, lng) {
       <dt>Sun elevation</dt><dd>${el.toFixed(1)}° — ${el > 0 ? 'daytime' : el > -6 ? 'civil twilight' : el > -18 ? 'twilight' : 'night'}</dd>
     </dl>
     <div id="probe-live" class="muted">Fetching weather and elevation…</div>
-    <div id="probe-plate" class="muted"></div>`;
+    <div id="probe-plate" class="muted"></div>
+    <h4>Look around</h4>
+    <div class="row">
+      <a class="btn ghost" href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}" target="_blank" rel="noopener">Street View</a>
+      <a class="btn ghost" href="https://earth.google.com/web/@${lat},${lng},150a,900d,35y,0h,65t,0r" target="_blank" rel="noopener">Google Earth 3D</a>
+      <a class="btn ghost" href="https://www.mapillary.com/app/?lat=${lat}&lng=${lng}&z=17" target="_blank" rel="noopener">Mapillary</a>
+      <button class="btn ghost" data-fly="${lat},${lng},0.0015">Zoom to street level</button>
+    </div>
+    <div id="probe-photos"></div><div id="probe-cams"></div>`;
 }
 async function fillProbe(lat, lng) {
   const token = `${lat},${lng}`; fillProbe.token = token;
+  lookAround(lat, lng, token);
   getLocal('data/plate-boundaries.json').then((g) => {
     const lines = g.features.map((f) => ({ name: f.properties.Name, pts: f.geometry.coordinates.map(([a, b]) => [b, a]) }));
     const n = astro.nearestOnLines(lat, lng, lines);
@@ -420,6 +545,21 @@ async function fillProbe(lat, lng) {
   } catch {
     const el = $('#probe-live'); if (el && fillProbe.token === token) el.innerHTML = '<span class="err">Open-Meteo did not respond. Weather and elevation are unavailable right now.</span>';
   }
+}
+// Street-level photos from Panoramax (open, keyless) and the nearest live cameras.
+async function lookAround(lat, lng, token) {
+  const cams = state.data.cameras?.cams;
+  if (cams) {
+    const near = cams.map((c) => ({ c, km: astro.haversineKm(lat, lng, c.lat, c.lng) })).filter((x) => x.km < 25).sort((a, b) => a.km - b.km).slice(0, 4);
+    if (near.length && $('#probe-cams')) $('#probe-cams').innerHTML = `<h4>Live cameras nearby</h4><div class="camwall">${near.map(({ c, km }) => `<button class="camtile" data-cam="${esc(c.id)}"><img src="${esc(c.img)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"/><span>${esc(c.name)}</span><small>${km.toFixed(1)} km</small></button>`).join('')}</div>`;
+  }
+  try {
+    const d = 0.004;
+    const j = await getFeed('panoramax', `https://api.panoramax.xyz/api/search?bbox=${lng - d},${lat - d},${lng + d},${lat + d}&limit=6`, { ttl: 3600_000 });
+    const fs = (j.features ?? []).filter((f) => f.assets?.thumb?.href);
+    if (fillProbe.token !== token || !fs.length || !$('#probe-photos')) return;
+    $('#probe-photos').innerHTML = `<div class="photos">${fs.map((f) => `<a href="${esc(f.assets.hd?.href ?? f.assets.thumb.href)}" target="_blank" rel="noopener"><img src="${esc(f.assets.thumb.href)}" alt="Street-level photo" loading="lazy"/></a>`).join('')}</div><p class="muted">Street-level photos: Panoramax contributors (CC BY-SA).</p>`;
+  } catch { /* optional */ }
 }
 const WMO = { 0: 'Clear', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast', 45: 'Fog', 48: 'Rime fog', 51: 'Light drizzle', 53: 'Drizzle', 55: 'Heavy drizzle', 61: 'Light rain', 63: 'Rain', 65: 'Heavy rain', 66: 'Freezing rain', 67: 'Heavy freezing rain', 71: 'Light snow', 73: 'Snow', 75: 'Heavy snow', 77: 'Snow grains', 80: 'Rain showers', 81: 'Heavy showers', 82: 'Violent showers', 85: 'Snow showers', 86: 'Heavy snow showers', 95: 'Thunderstorm', 96: 'Thunderstorm with hail', 99: 'Severe thunderstorm with hail' };
 
@@ -627,6 +767,11 @@ async function buildIndex() {
   (await getLocal('data/countries.geojson')).features.filter((f) => f.geometry).forEach((f) => {
     const c = centroid(f.geometry); if (c) add(f.properties.name, 'Country', c[0], c[1], 1.1, null);
   });
+  (await getLocal('data/cities.json')).rows.forEach(([name, lat, lng, pop, capital, cc, region]) => add(name, capital ? 'Capital city' : 'City', lat, lng, 0.06, { layer: 'cities', d: { name, lat, lng, pop, capital: !!capital, cc, region } }));
+  (await getLocal('data/airports.json')).rows.forEach(([iata, icao, name, lat, lng, elev, city, cc, large]) => {
+    const d = { iata, icao, name, lat, lng, elev, city, cc, large: !!large };
+    add(`${iata} · ${name}`, 'Airport', lat, lng, 0.03, { layer: 'airports', d });
+  });
   TOURS.forEach((t) => I.push({ name: t.title, kind: 'Tour', tour: t.id, key: t.title.toLowerCase() }));
   LAYERS.forEach((l) => I.push({ name: l.label, kind: 'Layer', layer: l.id, key: l.label.toLowerCase() }));
   return I;
@@ -644,7 +789,7 @@ q.addEventListener('input', async () => {
   index ??= await buildIndex();
   const s = q.value.trim().toLowerCase();
   if (s.length < 2) { list.hidden = true; return; }
-  hits = index.filter((x) => x.key.includes(s)).sort((a, b) => a.key.indexOf(s) - b.key.indexOf(s) || a.name.length - b.name.length).slice(0, 8);
+  hits = index.filter((x) => x.key.includes(s)).sort((a, b) => a.key.indexOf(s) - b.key.indexOf(s) || (b.kind.includes('City') - a.kind.includes('City')) || a.name.length - b.name.length).slice(0, 9);
   hits.push({ name: `Search “${q.value.trim()}” worldwide`, kind: 'OpenStreetMap', osm: true });
   sel = -1; renderHits();
 });
@@ -684,18 +829,20 @@ async function geocode(text) {
     fly(Number(p.lat), Number(p.lon), Math.max(0.002, Math.min(2.5, Math.max(bb[1] - bb[0], bb[3] - bb[2]) / 40)));
   } catch { openNotes('Search', '<p class="err">OpenStreetMap search did not respond. Try again in a moment.</p>'); }
 }
-function fly(lat, lng, altitude) {
+function fly(lat, lng, altitude, pin = true) {
   globe.pointOfView({ lat, lng, altitude }, reduceMotion ? 0 : 2200);
-  setPins([{ lat, lng, cls: '' }]);
+  if (pin) setPins([{ lat, lng, cls: '' }]);
 }
+let followAt = 0;
+function followTo(lat, lng) { if (performance.now() - followAt < 900) return; followAt = performance.now(); globe.pointOfView({ lat, lng, altitude: state.pov.altitude }, reduceMotion ? 0 : 1100); }
 
 // ------------------------------------------------------------------ camera, readout, auto-detail, hash
 function onCamera(pov) {
+  const prevAlt = state.pov.altitude;
   state.pov = pov;
-  controls.rotateSpeed = Math.max(0.03, Math.min(1, pov.altitude * 0.7));
-  controls.zoomSpeed = pov.altitude < 0.05 ? 0.6 : 1;
-  const cam = globe.camera(); const near = Math.max(0.005, Math.min(1, pov.altitude * R * 0.05));
-  if (Math.abs(cam.near - near) / near > 0.2) { cam.near = near; cam.updateProjectionMatrix(); }
+  nav.tune(pov.altitude);
+  if (state.on.has('aircraft') && Math.abs(Math.log(pov.altitude / prevAlt)) > 0.02) layoutPlanes(globe, pov.altitude);
+  clearTimeout(onCamera.v); onCamera.v = setTimeout(viewSettled, 280);
   if (!cursor) showReadout(pov.lat, pov.lng);
   $('#ro-alt').textContent = `eye ${Math.round(pov.altitude * astro.R_EARTH_KM).toLocaleString()} km`;
   // automatic street-level detail
@@ -705,6 +852,38 @@ function onCamera(pov) {
   }
   clearTimeout(onCamera.t); onCamera.t = setTimeout(writeHash, 500);
 }
+// After the camera stops: refresh the layers that depend on what is in view (city names, pins, cameras…).
+function viewSettled() {
+  applyZoomScale();
+  for (const l of LAYERS) {
+    if (!l.viewDependent || !state.on.has(l.id) || !state.data[l.id]) continue;
+    if (l.reloadOnView) refreshLayer(l.id); else state.chan[l.id] = l.channels(state.data[l.id], ctx());
+  }
+  compose();
+}
+// Screen-space picking for things drawn as particles or instances (planes, satellites, cameras from afar).
+let downAt = null;
+$('#globe').addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; }, true);
+$('#globe').addEventListener('pointerup', (e) => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5 || state.mode === 'measure' || state.mode === 'quiz') return;
+  if (e.target.closest?.('.pinx')) return;
+  const rect = $('#globe').getBoundingClientRect(); const x = e.clientX - rect.left; const y = e.clientY - rect.top;
+  const cam = globe.camera().position; const cr = cam.length();
+  let best = null; let bestD = 11;
+  for (const l of LAYERS) {
+    const pk = state.on.has(l.id) && state.chan[l.id]?.pick; if (!pk) continue;
+    for (const p of pk) {
+      const s = globe.getScreenCoords(p.lat, p.lng, p.alt); if (!s) continue;
+      const d = Math.hypot(s.x - x, s.y - y); if (d >= bestD) continue;
+      const w = globe.getCoords(p.lat, p.lng, p.alt); // hidden behind the Earth?
+      const dx = w.x - cam.x; const dy = w.y - cam.y; const dz = w.z - cam.z; const len = Math.hypot(dx, dy, dz);
+      const tca = -(cam.x * dx + cam.y * dy + cam.z * dz) / len; const d2 = cr * cr - tca * tca;
+      if (tca > 0 && d2 < R * R && tca - Math.sqrt(R * R - d2) < len - 0.01) continue;
+      best = p; bestD = d;
+    }
+  }
+  if (best) { state.hitAt = performance.now(); select(best.ref); }
+}, true);
 let cursor = null;
 function showReadout(lat, lng) { $('#ro-lat').textContent = astro.fmtLat(lat); $('#ro-lng').textContent = astro.fmtLng(lng); }
 $('#globe').addEventListener('pointermove', (e) => {
@@ -766,6 +945,24 @@ $('#gibs-date-input').max = new Date(Date.now() - 24 * 3600_000).toISOString().s
 $('#gibs-date-input').value = gibsDate();
 $('#gibs-date-input').addEventListener('change', (e) => { state.gibsDate = e.target.value || null; applyBase(); });
 
+// ------------------------------------------------------------------ plug-in layers (flights, cameras, places)
+const api = { globe, state, esc, openNotes, isOpen, refreshLayer, fly, followTo, setBase, wmo: (c) => WMO[c] ?? '—', select };
+{
+  const add = (layer, afterId) => { const i = LAYERS.findIndex((l) => l.id === afterId); LAYERS.splice(i + 1, 0, layer); layerById[layer.id] = layer; };
+  add(flightsLayer(api), 'events');
+  add(camerasLayer(api), 'aurora'); add(alprLayer(api), 'cameras');
+  add(citiesLayer, 'grid'); add(airportsLayer, 'cities');
+  GROUPS.splice(1, 0, { id: 'cams', label: 'Cameras' });
+  GROUPS.splice(3, 0, { id: 'places', label: 'Places' });
+  for (const l of [layerById.aircraft, layerById.cameras, layerById.alpr, layerById.cities, layerById.airports]) {
+    state.opts[l.id] = Object.fromEntries((l.options ?? []).map((o) => [o.id, structuredClone(o.value)]));
+    if (l.on && !location.hash.includes('&l=')) state.on.add(l.id);
+  }
+  // hash may list layers that only exist now
+  const hl = decodeURIComponent(location.hash).match(/[&]l=([\w,]*)/);
+  if (hl) for (const id of hl[1].split(',')) if (layerById[id]) state.on.add(id);
+}
+
 // ------------------------------------------------------------------ boot
 function intro() {
   if (intro.done) return; intro.done = true;
@@ -798,4 +995,4 @@ if (window.__TAURI_INTERNALS__) {
     if (a && new URL(a.href).origin !== location.origin) { e.preventDefault(); window.__TAURI_INTERNALS__.invoke('plugin:opener|open_url', { url: a.href }); }
   });
 }
-window.terraAtlas = { globe, state, setBase, toggleLayer, startTour, setMode, select, showLearn, surfaceClick, countryAt, setLook }; // for tinkering in the console
+window.terraAtlas = { globe, state, setBase, toggleLayer, startTour, setMode, select, showLearn, surfaceClick, countryAt, setLook, refreshLayer, flightState }; // for tinkering in the console

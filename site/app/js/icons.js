@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Terra Atlas — small map glyphs for pins (24×24 viewBox, drawn in currentColor).
+const S = (d, fill = false) => `<svg viewBox="0 0 24 24" aria-hidden="true" ${fill ? 'fill="currentColor"' : 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"'}>${d}</svg>`;
+export const ICONS = {
+  camera: S('<path d="M3 8h3.5l2-2.5h7l2 2.5H21v11H3z"/><circle cx="12" cy="13" r="3.6"/>'),
+  alpr: S('<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 12h2M11 12h2M15 12h2"/>'),
+  plane: S('<path d="M12 2.5c.8 0 1.3.9 1.3 2v5.2l7.2 4v2l-7.2-2.1V19l2.2 1.7V22L12 21.2 8.5 22v-1.3l2.2-1.7v-5.4l-7.2 2.1v-2l7.2-4V4.5c0-1.1.5-2 1.3-2z"/>', true),
+  anchor: S('<circle cx="12" cy="5" r="2"/><path d="M12 7v14M5 13a7 7 0 0 0 14 0M8 11h8"/>'),
+  rocket: S('<path d="M12 2c3 2.5 4.5 6 4.5 10l-2 3h-5l-2-3C7.5 8 9 4.5 12 2z"/><circle cx="12" cy="9" r="1.6"/><path d="M9.5 15l-2 4 3-1M14.5 15l2 4-3-1"/>'),
+  atom: S('<circle cx="12" cy="12" r="1.6"/><ellipse cx="12" cy="12" rx="9" ry="3.6"/><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(120 12 12)"/>'),
+  chip: S('<rect x="6" y="6" width="12" height="12" rx="1.5"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>'),
+  bank: S('<path d="M3 9l9-5 9 5M5 9v9M9.5 9v9M14.5 9v9M19 9v9M3 20h18"/>'),
+  mine: S('<path d="M4 20l8-8M14 4c3 0 6 3 6 6M9 7c3-3 8-3 11 0"/>'),
+  strait: S('<path d="M3 8c3 0 3 3 6 3s3-3 6-3 3 3 6 3M3 15c3 0 3 3 6 3s3-3 6-3 3 3 6 3"/>'),
+  alert: S('<path d="M12 3l9.5 17h-19z"/><path d="M12 10v4M12 17.2v.3"/>'),
+  flame: S('<path d="M12 22c4 0 7-2.8 7-6.8 0-4.2-3.4-6.6-4.6-10.2-.8 2.8-2.6 3.6-3.6 3.6.4-2.4-.4-4.8-2.6-6.6C8 5.8 5 9.6 5 15.2 5 19.2 8 22 12 22z"/>', true),
+  storm: S('<path d="M12 12m-2.5 0a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0M12 3c-5 0-8 3-8 7M12 21c5 0 8-3 8-7M4 10c0 2 1 3 3 3.5M20 14c0-2-1-3-3-3.5"/>'),
+  volcano: S('<path d="M2 21l6.5-10h7L22 21zM10 5l1 3M14 5l-1 3M12 2v3"/>'),
+  ice: S('<path d="M12 2v20M3.5 7l17 10M20.5 7l-17 10"/>'),
+  water: S('<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>'),
+  sat: S('<rect x="9" y="9" width="6" height="6" transform="rotate(45 12 12)"/><path d="M4 4l3.5 3.5M16.5 16.5L20 20M2 8l6-6M16 22l6-6"/>'),
+  city: S('<path d="M3 21V10l5-3v14M8 21V4l7 3v14M15 21v-9l6 2v7M2 21h20"/>'),
+  pin: S('<path d="M12 22s7-7.2 7-12.5A7 7 0 0 0 5 9.5C5 14.8 12 22 12 22z"/><circle cx="12" cy="9.5" r="2.5"/>'),
+};

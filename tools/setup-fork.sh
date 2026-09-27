@@ -8,7 +8,7 @@ set -euo pipefail
 # 1. Park World Monitor's ~40 CI workflows (they need secrets and infrastructure a fork does not have).
 mkdir -p .github/workflows-upstream
 for f in .github/workflows/*.yml; do
-  case "$(basename "$f")" in pages.yml|desktop.yml|video.yml) ;; *) git mv -k "$f" .github/workflows-upstream/ 2>/dev/null || mv "$f" .github/workflows-upstream/ ;; esac
+  case "$(basename "$f")" in pages.yml|desktop.yml|video.yml|data.yml) ;; *) git mv -k "$f" .github/workflows-upstream/ 2>/dev/null || mv "$f" .github/workflows-upstream/ ;; esac
 done
 echo "Parked upstream workflows in .github/workflows-upstream/ (restore any with git mv)."
 

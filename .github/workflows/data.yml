@@ -1,0 +1,32 @@
+# Terra Atlas — refresh the public camera list and the OpenStreetMap ALPR snapshot, then redeploy the site.
+name: Refresh camera data
+on:
+  schedule:
+    - cron: '17 9 * * *'   # daily, 09:17 UTC
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: write
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Traffic cameras
+        run: node tools/fetch-cameras.mjs
+      - name: Licence-plate readers (OpenStreetMap)
+        run: node tools/fetch-alpr.mjs
+      - name: Commit if anything changed
+        run: |
+          git config user.name "terra-atlas-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add site/app/data/cameras.json site/app/data/alpr || true
+          if git diff --cached --quiet; then echo "No changes"; echo "changed=false" >> "$GITHUB_ENV"; else git commit -m "data: refresh cameras and ALPR snapshot"; git push; echo "changed=true" >> "$GITHUB_ENV"; fi
+      - name: Redeploy the site
+        if: env.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main

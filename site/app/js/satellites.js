@@ -104,3 +104,41 @@ export function groundTrack(sat, snapshot, minutes = 95, stepSec = 30, now = new
 
 /** Orbital period (minutes) from mean motion — Kepler's third law in disguise. */
 export const periodMinutes = (sat) => (2 * Math.PI) / sat.satrec.no; // no = rad/min
+
+const MU = 398600.4418;
+/** Orbital elements from the TLE: size, shape and tilt of the orbit. */
+export function orbitalElements(sat) {
+  const r = sat.satrec; const n = r.no / 60; const a = Math.cbrt(MU / (n * n));
+  const perigeeKm = a * (1 - r.ecco) - R_EARTH_KM; const apogeeKm = a * (1 + r.ecco) - R_EARTH_KM;
+  const incDeg = (r.inclo * 180) / Math.PI; const periodMin = (2 * Math.PI) / r.no;
+  const cls = r.ecco > 0.25 ? 'Highly elliptical orbit' : Math.abs(periodMin - 1436) < 30 && incDeg < 15 ? 'Geostationary / geosynchronous (GEO)' : apogeeKm > 2000 ? (apogeeKm > 30000 ? 'High Earth orbit' : 'Medium Earth orbit (MEO)') : 'Low Earth orbit (LEO)';
+  return { a, perigeeKm, apogeeKm, incDeg, periodMin, ecc: r.ecco, cls };
+}
+/** One full orbit as a path (lat, lng, altitude in globe radii). */
+export function orbitPath(sat, snapshot, now = new Date(), steps = 180) {
+  const per = (2 * Math.PI) / sat.satrec.no; const pts = [];
+  for (let i = 0; i <= steps; i++) {
+    const d = new Date(now.getTime() + (i / steps) * per * 60000);
+    const p = propagate(sat, timeFor(sat, d, snapshot, T0));
+    if (p) pts.push([p.lat, p.lng, p.altKm / R_EARTH_KM]);
+  }
+  return pts;
+}
+/** Passes above 10° elevation for an observer in the next `hours`. */
+export function passes(sat, lat, lng, hours = 36) {
+  const obs = { longitude: satellite.degreesToRadians(lng), latitude: satellite.degreesToRadians(lat), height: 0.05 };
+  const out = []; let cur = null; const t0 = Date.now();
+  for (let s = 0; s < hours * 3600; s += 20) {
+    const d = new Date(t0 + s * 1000);
+    const pv = satellite.propagate(sat.satrec, d); if (!pv.position) continue;
+    const ecf = satellite.eciToEcf(pv.position, satellite.gstime(d));
+    const look = satellite.ecfToLookAngles(obs, ecf);
+    const el = (look.elevation * 180) / Math.PI;
+    if (el > 10) {
+      if (!cur) cur = { start: d, maxEl: el, maxAt: d, az: (look.azimuth * 180) / Math.PI };
+      if (el > cur.maxEl) { cur.maxEl = el; cur.maxAt = d; }
+      cur.end = d;
+    } else if (cur) { out.push(cur); cur = null; if (out.length >= 6) break; }
+  }
+  return out;
+}

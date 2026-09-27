@@ -16,6 +16,20 @@ Every data source, library and reference used by the Terra Atlas globe app. This
 | [OpenSky Network (Schäfer et al., IPSN 2014)](https://opensky-network.org) | Non-commercial research/education | Aircraft fallback feed. |
 | [NASA GIBS — VIIRS SNPP Corrected Reflectance (true colour)](https://nasa-gibs.github.io/gibs-api-docs/) | Public domain; acknowledgement requested | Yesterday’s Earth base map. We acknowledge the use of imagery provided by services from NASA’s Global Imagery Browse Services (GIBS), part of NASA’s Earth Science Data and Information System (ESDIS). |
 | [God’s Eye View (Bilawal Sidhu)](https://github.com/bilawalsidhu/gods-eye-view) | MIT | Inspiration for sensor looks and keyless browser data sources. |
+| [airplanes.live](https://airplanes.live) | Free non-commercial API | Regional aircraft fallback feed. |
+| [adsbdb (api.adsbdb.com)](https://www.adsbdb.com) | Courtesy API; route data © David Taylor & Jim Mason, not stored | Aircraft type, registration, photo and route for a selected flight (looked up live, never stored). |
+| [Caltrans CWWP2 — CCTV status (all 12 districts)](https://cwwp2.dot.ca.gov/documentation/cctv/cctv.htm) | Public data (State of California) | California highway cameras, stills and live streams. |
+| [NYC DOT traffic cameras (webcams.nyctmc.org)](https://webcams.nyctmc.org) | Public data (City of New York) | New York City traffic cameras. |
+| [511 Ontario open data](https://511on.ca/developers/doc) | Open Government Licence – Ontario | Ontario highway cameras. |
+| [511 Alberta open data](https://511.alberta.ca/developers/doc) | Open Government Licence – Alberta | Alberta highway cameras. |
+| [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) | ODbL 1.0 | Mapped licence-plate readers (surveillance:type=ALPR). |
+| [DeFlock — crowdsourced ALPR mapping](https://deflock.me) | Data in OpenStreetMap (ODbL) | Project behind most mapped Flock and other ALPR cameras. |
+| [Overpass API](https://overpass-api.de) | Service for OSM data (ODbL) | Live query of mapped cameras in view. |
+| [EFF — Automated License Plate Readers](https://sls.eff.org/technologies/automated-license-plate-readers-alprs) | Reference | Civil-liberties perspective on ALPR. |
+| [ACLU — You Are Being Tracked (ALPR report)](https://www.aclu.org/issues/privacy-technology/location-tracking/you-are-being-tracked) | Reference | Policy report on ALPR data retention. |
+| [OurAirports](https://ourairports.com/data/) | Public domain | Airports layer and search. |
+| [Panoramax](https://panoramax.fr) | CC BY-SA 4.0 (photos) | Open street-level photos in the point probe. |
+| [hls.js](https://github.com/video-dev/hls.js) | Apache-2.0 | Plays live camera video streams. |
 | [Open-Meteo forecast & elevation APIs](https://open-meteo.com) | CC BY 4.0 | Weather and ground elevation for any clicked point. |
 | [REST Countries](https://restcountries.com) | MPL-2.0 | Capital, population, languages, currencies for the country card. |
 | [World Bank Open Data API](https://datahelpdesk.worldbank.org/knowledgebase/articles/889392) | CC BY 4.0 | GDP, life expectancy, internet use and renewable share indicators. |
@@ -36,7 +50,7 @@ Every data source, library and reference used by the Terra Atlas globe app. This
 | [USGS — This Dynamic Earth](https://pubs.usgs.gov/gip/dynamic/dynamic.html) | Public domain | Plate tectonics primer. |
 | [NASA Earth Observatory — Catalog of Earth Satellite Orbits](https://earthobservatory.nasa.gov/features/OrbitsCatalog) | Public domain | Orbits primer (LEO, MEO, GEO). |
 | [NOAA SWPC — Planetary K-index](https://www.swpc.noaa.gov/products/planetary-k-index) | Public domain | Kp scale explanation. |
-| [Natural Earth / world-atlas (country outlines used by World Monitor)](https://www.naturalearthdata.com) | Public domain | Country polygons. |
+| [Natural Earth (country outlines via World Monitor; populated places)](https://www.naturalearthdata.com) | Public domain | Country polygons and city names. |
 
 ## Projects this site references or borrows from
 

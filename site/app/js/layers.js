@@ -6,7 +6,7 @@
 
 import { getFeed, getLocal } from './feeds.js';
 import { terminator, subsolarPoint, smallCircle, fmtLat, fmtLng } from './astro.js';
-import { SAT_GROUPS, loadGroup, positions, groundTrack, periodMinutes } from './satellites.js';
+import { SAT_GROUPS, loadGroup, positions, groundTrack, periodMinutes, orbitalElements, orbitPath } from './satellites.js';
 
 export const GROUPS = [
   { id: 'live', label: 'Live Earth' },
@@ -90,7 +90,7 @@ export const LAYERS = [
     },
   },
   {
-    id: 'events', group: 'live', label: 'Natural events', swatch: '#ff8a4c', on: true, refresh: 30 * 60_000,
+    id: 'events', pin: (d) => ({ wildfires: 'flame', severeStorms: 'storm', volcanoes: 'volcano', seaLakeIce: 'ice', floods: 'water' }[d.categories?.[0]?.id] ?? 'alert'), group: 'live', label: 'Natural events', swatch: '#ff8a4c', on: true, refresh: 30 * 60_000,
     sources: ['eonet'],
     async load() {
       const j = await getFeed('eonet', 'https://eonet.gsfc.nasa.gov/api/v3/events?status=open&days=45&limit=500');
@@ -159,38 +159,6 @@ export const LAYERS = [
     },
   },
 
-  {
-    id: 'aircraft', group: 'live', label: 'Aircraft near view', swatch: '#e9f2f7', on: false, refresh: 20_000,
-    sources: ['adsblol', 'opensky'],
-    async load(_o, ctx) {
-      const { lat, lng } = ctx.pov;
-      try {
-        const j = await getFeed('adsblol', `https://api.adsb.lol/v2/lat/${lat.toFixed(2)}/lon/${lng.toFixed(2)}/dist/250`, { ttl: 15_000 });
-        return { src: 'adsb.lol', ac: (j.ac ?? []).filter((a) => a.lat != null).map((a) => ({ id: a.hex, call: (a.flight ?? '').trim(), lat: a.lat, lng: a.lon, altFt: typeof a.alt_baro === 'number' ? a.alt_baro : 0, kt: a.gs, trk: a.track, type: a.t, reg: a.r })) };
-      } catch {
-        const b = `lamin=${(lat - 6).toFixed(2)}&lamax=${(lat + 6).toFixed(2)}&lomin=${(lng - 9).toFixed(2)}&lomax=${(lng + 9).toFixed(2)}`;
-        const j = await getFeed('opensky', `https://opensky-network.org/api/states/all?${b}`, { ttl: 15_000 });
-        return { src: 'OpenSky Network', ac: (j.states ?? []).filter((s) => s[6] != null).map((s) => ({ id: s[0], call: (s[1] ?? '').trim(), lat: s[6], lng: s[5], altFt: (s[7] ?? 0) * 3.281, kt: s[9] != null ? s[9] * 1.944 : null, trk: s[10] })) };
-      }
-    },
-    channels(d) {
-      return { points: d.ac.slice(0, 1500).map((a) => point('aircraft', { ...a, src: d.src }, a.lat, a.lng, a.altFt > 20000 ? '#e9f2f7' : '#9fc3e6', 0.06, 0.004 + (a.altFt / 3281 / 6371) * 25, tip(a.call || a.id, `${Math.round(a.altFt).toLocaleString()} ft · ${a.kt ? Math.round(a.kt) : '—'} kt`))) };
-    },
-    describe(a) {
-      return {
-        title: a.call || a.id, sub: [a.type, a.reg].filter(Boolean).join(' · ') || 'Aircraft',
-        rows: [['Altitude', `${Math.round(a.altFt).toLocaleString()} ft (${(a.altFt / 3281).toFixed(1)} km)`], ['Ground speed', a.kt ? `${Math.round(a.kt)} kt (${Math.round(a.kt * 1.852)} km/h)` : '—'], ['Track', a.trk != null ? `${Math.round(a.trk)}°` : '—'], ['ICAO address', a.id], ['Feed', a.src]],
-        body: 'Positions come from ADS-B: the aircraft works out where it is with satellite navigation and broadcasts it about twice a second on 1090 MHz. Volunteers’ ground receivers pick the messages up and share them. Heights are exaggerated 25× on the globe so you can see them.',
-        links: [{ label: 'Track on adsb.lol', url: `https://adsb.lol/?icao=${a.id}` }],
-      };
-    },
-    learn: {
-      what: 'Live aircraft within about 460 km of the centre of your view, refreshed every 20 seconds. Pale dots are above 20,000 ft. Move the globe and the next refresh follows you.',
-      how: 'ADS-B broadcasts received by the volunteer networks adsb.lol (ODbL) and, as a fallback, the OpenSky Network (non-commercial use). Coverage depends on where receivers are, so oceans and some countries look empty.',
-      try: 'Zoom to a big hub such as London or Atlanta and watch arrivals line up on the approach paths.',
-      refs: ['adsblol', 'opensky'],
-    },
-  },
 
   // ------------------------------------------------------------ SPACE
   {
@@ -246,6 +214,7 @@ export const LAYERS = [
           ['Orbital period', `${per.toFixed(1)} min — ${(1440 / per).toFixed(1)} orbits a day`], ['NORAD id', p.norad], ['Position', `${fmtLat(p.lat)}, ${fmtLng(p.lng)}`]],
         body: 'At this height the station is still inside a thin trace of atmosphere, so drag slowly lowers its orbit and it needs periodic re-boosts. The yellow line is its ground track: the orbit stays fixed in space while Earth turns underneath, so each pass shifts about 23° west.',
         links: [{ label: 'NASA — Spot the Station', url: 'https://spotthestation.nasa.gov' }, wiki(p.name)],
+        actions: [['passes', 'When can I see it from here?'], ['orbit', 'Show its full orbit']],
       };
     },
     learn: {
@@ -265,15 +234,19 @@ export const LAYERS = [
       return res;
     },
     channels(groups, ctx) {
-      const particles = [];
+      const particles = []; const pick = []; const paths = [];
       for (const [k, g] of Object.entries(groups)) {
         const def = SAT_GROUPS[k];
-        particles.push({ color: def.color, size: def.size, pts: positions(g, ctx.now).map((p) => ({ lat: p.lat, lng: p.lng, alt: p.alt })) });
+        const pos = positions(g, ctx.now);
+        particles.push({ color: def.color, size: def.size, pts: pos.map((p) => ({ lat: p.lat, lng: p.lng, alt: p.alt })) });
+        for (const p of pos) pick.push({ lat: p.lat, lng: p.lng, alt: p.alt, ref: { layer: 'satellites', d: { ...p, group: def.label, snapshot: g.snapshot, snapshotEpoch: g.snapshotEpoch } } });
       }
-      return { particles };
+      if (orbitOf.sat) paths.push({ pts: orbitPath(orbitOf.sat, orbitOf.snapshot, ctx.now), color: 'rgba(183,163,255,0.9)', stroke: 0.5, passive: true });
+      return { particles, pick, paths };
     },
+    describe: (p) => describeSat(p),
     learn: {
-      what: 'Each dot is one satellite, grouped by job. Low Earth orbit hugs the planet; GPS sits in a medium-orbit shell about 20,200 km up; geostationary satellites form a ring 35,786 km above the equator.',
+      what: 'Each dot is one satellite, grouped by job. Click a dot for its orbit. Low Earth orbit hugs the planet; GPS sits in a medium-orbit shell about 20,200 km up; geostationary satellites form a ring 35,786 km above the equator.',
       how: 'Same pipeline as the stations: CelesTrak TLEs + SGP4, recomputed every three seconds. Zoom out a long way to see the GPS and geostationary shells.',
       try: 'Enable Geostationary and look straight down at the North Pole: the ring is perfectly circular and does not move relative to the ground — the orbital period equals one sidereal day.',
       refs: ['celestrak', 'satellitejs', 'nasaorbits'],
@@ -416,15 +389,15 @@ export const LAYERS = [
     },
   },
   {
-    id: 'waterways', group: 'infra', label: 'Chokepoints', swatch: '#e3b55b', on: false, sources: ['worldmonitor', 'eia'],
+    id: 'waterways', pin: 'strait', group: 'infra', label: 'Chokepoints', swatch: '#e3b55b', on: false, sources: ['worldmonitor', 'eia'],
     async load() { return (await worldMonitorData()).waterways; },
     channels(ws) {
       return {
-        points: ws.map((w) => point('waterways', w, w.lat, w.lng ?? w.lon, '#e3b55b', 0.4, 0.02, tip(title(w.name), w.description))),
+        points: ws.map((w) => point('waterways', w, w.lat, w.lon, '#e3b55b', 0.4, 0.02, tip(title(w.name), w.description))),
         labels: ws.map((w) => ({ lat: w.lat, lng: w.lon, text: title(w.name), size: 0.75, color: '#e3b55b', dot: 0, ref: { layer: 'waterways', d: w } })),
       };
     },
-    describe(w) { return { title: title(w.name), sub: 'Strategic waterway', body: w.description, links: [{ label: 'EIA: World Oil Transit Chokepoints', url: 'https://www.eia.gov/international/analysis/special-topics/World_Oil_Transit_Chokepoints' }, wiki(title(w.name))] }; },
+    describe(w) { return { wiki: title(w.name), probe: [w.lat, w.lon], title: title(w.name), sub: 'Strategic waterway', body: w.description, links: [{ label: 'EIA: World Oil Transit Chokepoints', url: 'https://www.eia.gov/international/analysis/special-topics/World_Oil_Transit_Chokepoints' }, wiki(title(w.name))] }; },
     learn: {
       what: 'Narrow straits and canals that a large share of shipping must pass through.',
       how: 'Positions and notes from World Monitor’s chokepoint registry.',
@@ -433,45 +406,45 @@ export const LAYERS = [
     },
   },
   {
-    id: 'ports', group: 'infra', label: 'Major ports', swatch: '#9fc3e6', on: false, sources: ['worldmonitor'],
+    id: 'ports', pin: 'anchor', group: 'infra', label: 'Major ports', swatch: '#9fc3e6', on: false, sources: ['worldmonitor'],
     async load() { return (await worldMonitorData()).ports; },
     channels(ps) { return { points: ps.map((p) => point('ports', p, p.lat, p.lon, '#9fc3e6', 0.28, 0.015, tip(p.name, `${p.type} port${p.rank ? ` · #${p.rank}` : ''}`))) }; },
-    describe(p) { return { title: p.name, sub: `${p.country} · ${p.type} port`, rows: [['Rank', p.rank ?? '—']], body: p.note, links: [wiki(p.name)] }; },
+    describe(p) { return { wiki: p.name, probe: [p.lat, p.lon], title: p.name, sub: `${p.country} · ${p.type} port`, rows: [['Rank', p.rank ?? '—']], body: p.note, links: [wiki(p.name)] }; },
     learn: { what: 'The world’s biggest container, oil, LNG and bulk ports.', how: 'Curated in World Monitor from port-authority statistics.', try: 'Notice how many top container ports sit on one stretch of coast between Shanghai and Singapore.', refs: ['worldmonitor'] },
   },
   {
-    id: 'datacenters', group: 'infra', label: 'AI data centres', swatch: '#b7a3ff', on: false, sources: ['worldmonitor'],
+    id: 'datacenters', pin: 'chip', group: 'infra', label: 'AI data centres', swatch: '#b7a3ff', on: false, sources: ['worldmonitor'],
     async load() { return (await worldMonitorData()).datacenters; },
     channels(ds) { return { points: ds.map((d) => point('datacenters', d, d.lat, d.lon, d.status === 'operational' ? '#b7a3ff' : 'rgba(183,163,255,0.55)', 0.16 + Math.min(0.35, Math.log10((d.chipCount ?? 1000) + 1) * 0.05), 0.01 + Math.min(0.12, (d.chipCount ?? 0) / 4e6), tip(d.name, `${d.owner ?? ''} · ${d.status}`))) }; },
     describe(d) { return { title: d.name, sub: `${d.owner ?? ''} · ${d.country}`, rows: [['Status', d.status], ['Accelerators', d.chipType ?? '—'], ['Chip count', d.chipCount ? d.chipCount.toLocaleString() : '—']], body: 'Large AI clusters are measured in accelerators and in grid power — a 100,000-GPU site draws on the order of 100+ MW, comparable to a small city.' }; },
     learn: { what: 'Announced and operating AI compute clusters from World Monitor. Bar height scales with chip count.', how: 'Compiled from company announcements and press reports; planned sites are faded.', try: 'Turn on Pipelines and Nuclear sites too — compute follows cheap, reliable power.', refs: ['worldmonitor'] },
   },
   {
-    id: 'nuclear', group: 'infra', label: 'Nuclear sites', swatch: '#9ff0c9', on: false, sources: ['worldmonitor', 'iaea'],
+    id: 'nuclear', pin: 'atom', group: 'infra', label: 'Nuclear sites', swatch: '#9ff0c9', on: false, sources: ['worldmonitor', 'iaea'],
     async load() { return (await worldMonitorData()).nuclear; },
     channels(ns) { return { points: ns.map((n) => point('nuclear', n, n.lat, n.lon, n.status === 'active' ? '#9ff0c9' : 'rgba(159,240,201,0.4)', 0.16, 0.008, tip(n.name, `${n.type} · ${n.status}`))) }; },
-    describe(n) { return { title: n.name, sub: `${n.type} · ${n.status}`, rows: [['Operator / country', n.operator ?? '—']], links: [{ label: 'IAEA PRIS', url: 'https://pris.iaea.org' }, wiki(n.name)] }; },
+    describe(n) { return { wiki: n.name, title: n.name, sub: `${n.type} · ${n.status}`, rows: [['Operator / country', n.operator ?? '—']], links: [{ label: 'IAEA PRIS', url: 'https://pris.iaea.org' }, wiki(n.name)] }; },
     learn: { what: 'Nuclear power plants and other nuclear facilities from World Monitor’s catalogue.', how: 'Curated from public registries such as the IAEA’s Power Reactor Information System.', try: 'Compare France, Japan and South Korea — dense fleets on coasts, because reactors need lots of cooling water.', refs: ['worldmonitor', 'iaea'] },
   },
   {
-    id: 'spaceports', group: 'infra', label: 'Spaceports', swatch: '#ffd37a', on: false, sources: ['worldmonitor'],
+    id: 'spaceports', pin: 'rocket', group: 'infra', label: 'Spaceports', swatch: '#ffd37a', on: false, sources: ['worldmonitor'],
     async load() { return (await worldMonitorData()).spaceports; },
     channels(ss) { return { points: ss.map((s) => point('spaceports', s, s.lat, s.lon, '#ffd37a', 0.35, 0.03, tip(s.name, s.operator))) }; },
-    describe(s) { return { title: s.name, sub: `${s.country} · ${s.operator}`, rows: [['Status', s.status], ['Launch cadence', s.launches]], body: 'Launching east near the equator borrows up to 465 m/s from Earth’s spin — one reason Kourou (5° N) is prized for geostationary missions.', links: [wiki(s.name)] }; },
+    describe(s) { return { wiki: s.name, probe: [s.lat, s.lon], title: s.name, sub: `${s.country} · ${s.operator}`, rows: [['Status', s.status], ['Launch cadence', s.launches]], body: 'Launching east near the equator borrows up to 465 m/s from Earth’s spin — one reason Kourou (5° N) is prized for geostationary missions.', links: [wiki(s.name)] }; },
     learn: { what: 'Active orbital launch sites.', how: 'From World Monitor’s spaceport list.', try: 'Note which ones sit on an east-facing coast: rockets launch over water, eastward.', refs: ['worldmonitor'] },
   },
   {
-    id: 'economic', group: 'infra', label: 'Financial centres', swatch: '#e9f2f7', on: false, sources: ['worldmonitor'],
+    id: 'economic', pin: 'bank', group: 'infra', label: 'Financial centres', swatch: '#e9f2f7', on: false, sources: ['worldmonitor'],
     async load() { return (await worldMonitorData()).economic; },
     channels(es) { return { points: es.map((e) => point('economic', e, e.lat, e.lon, '#e9f2f7', 0.26, 0.02, tip(e.name, e.type))) }; },
-    describe(e) { return { title: e.name, sub: `${e.country} · ${e.type}`, body: e.description, links: [wiki(e.name)] }; },
+    describe(e) { return { wiki: e.name, title: e.name, sub: `${e.country} · ${e.type}`, body: e.description, links: [wiki(e.name)] }; },
     learn: { what: 'Stock exchanges, central banks and financial hubs.', how: 'From World Monitor’s economic-centres list.', try: 'Switch on Day and night — trading moves west with the Sun from Tokyo to London to New York.', refs: ['worldmonitor'] },
   },
   {
-    id: 'minerals', group: 'infra', label: 'Critical minerals', swatch: '#c9a66b', on: false, sources: ['worldmonitor'],
+    id: 'minerals', pin: 'mine', group: 'infra', label: 'Critical minerals', swatch: '#c9a66b', on: false, sources: ['worldmonitor'],
     async load() { return (await worldMonitorData()).minerals; },
     channels(ms) { return { points: ms.map((m) => point('minerals', m, m.lat, m.lon, '#c9a66b', 0.34, 0.03, tip(m.name, m.mineral))) }; },
-    describe(m) { return { title: m.name, sub: `${m.mineral} · ${m.country}`, rows: [['Operator', m.operator], ['Status', m.status]], body: m.significance }; },
+    describe(m) { return { wiki: m.name, title: m.name, sub: `${m.mineral} · ${m.country}`, rows: [['Operator', m.operator], ['Status', m.status]], body: m.significance }; },
     learn: { what: 'Landmark mines for lithium, cobalt, rare earths and other battery and chip minerals.', how: 'From World Monitor’s critical-minerals list.', try: 'Compare where these are mined with where the AI data centres are.', refs: ['worldmonitor'] },
   },
 
@@ -486,7 +459,7 @@ export const LAYERS = [
     learn: { what: 'Active conflict theatres as outlined in World Monitor’s static configuration.', how: 'A hand-drawn baseline; the full World Monitor app enriches it with live event data (not available on this static site).', try: 'Turn on Chokepoints: several theatres sit beside a strategic strait.', refs: ['worldmonitor'] },
   },
   {
-    id: 'hotspots', group: 'geo', label: 'Watch regions', swatch: '#f07a63', on: false, sources: ['worldmonitor'],
+    id: 'hotspots', pin: 'alert', group: 'geo', label: 'Watch regions', swatch: '#f07a63', on: false, sources: ['worldmonitor'],
     async load() { return (await worldMonitorData()).hotspots; },
     channels(hs) { return { points: hs.map((h) => point('hotspots', h, h.lat, h.lon, '#f07a63', 0.32, 0.02, tip(h.name, h.subtext))) }; },
     describe(h) { return { title: h.name, sub: h.location, body: h.description, links: [wiki(h.name)] }; },
@@ -494,6 +467,20 @@ export const LAYERS = [
   },
 ];
 
+export const orbitOf = { sat: null, snapshot: false };
+function describeSat(p) {
+  const el = orbitalElements(p.sat);
+  return {
+    title: p.name, sub: `${p.group} · NORAD ${p.norad}${p.snapshot ? ' · offline snapshot' : ''}`,
+    rows: [['Orbit', el.cls], ['Altitude now', `${Math.round(p.altKm).toLocaleString()} km`], ['Speed', `${p.speedKms?.toFixed(2)} km/s`],
+      ['Period', `${el.periodMin.toFixed(1)} min`], ['Perigee · apogee', `${Math.round(el.perigeeKm).toLocaleString()} km · ${Math.round(el.apogeeKm).toLocaleString()} km`],
+      ['Inclination', `${el.incDeg.toFixed(1)}° — ${el.incDeg > 90 ? 'retrograde (sun-synchronous orbits sit near 98°)' : el.incDeg < 5 ? 'equatorial' : 'covers latitudes up to ' + Math.round(Math.min(el.incDeg, 180 - el.incDeg)) + '°'}`],
+      ['Eccentricity', el.ecc.toFixed(4)], ['Now over', `${fmtLat(p.lat)}, ${fmtLng(p.lng)}`]],
+    body: el.cls.startsWith('Geostationary') ? 'It circles once per sidereal day above the equator, so from the ground it seems to hang still — which is why satellite dishes never move.' : el.cls.startsWith('Medium') ? 'Navigation constellations like GPS, Galileo and GLONASS live in medium Earth orbit, high enough that each satellite sees a third of the planet.' : 'In low Earth orbit a satellite laps the planet every hour and a half and sees only a small patch of ground at a time — good for imaging, bad for coverage.',
+    links: [{ label: 'CelesTrak record', url: `https://celestrak.org/satcat/table-satcat.php?CATNR=${p.norad}` }, { label: 'N2YO live tracker', url: `https://www.n2yo.com/satellite/?s=${p.norad}` }],
+    actions: [['orbit', 'Show its full orbit'], ['passes', 'When can I see it from here?']],
+  };
+}
 function title(s) { return String(s).toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()); }
 export function plateLabel(code) {
   const [a, b] = String(code).split(/[-\\/]/);

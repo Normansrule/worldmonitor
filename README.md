@@ -23,6 +23,24 @@ Built on [World Monitor](https://github.com/koala73/worldmonitor) by Elie Habib.
 
 ---
 
+## ✨ New in v1.1
+
+| | What you get |
+|---|---|
+| ✈️ **Every flight in the sky** | Live aircraft worldwide (OpenSky) or in detail around your view (adsb.lol), drawn as plane pointers turned to their real heading and coloured by altitude — tens of thousands in a single draw call. |
+| 🪟 **Seatback flight view** | Click a plane for an airline-screen style panel: origin → destination with progress, altitude, ground speed, heading, climb rate, outside air temperature, distance and time to go, weather and local time at the destination, and a photo of the actual aircraft. *Follow* keeps the camera on it; *Window view* drops you to satellite imagery beneath it. |
+| 📹 **Live traffic cameras** | Public road cameras from Caltrans (all 12 California districts), NYC DOT, 511 Ontario and 511 Alberta. Stills refresh every 15 s; Caltrans cameras with a stream play live video. Every camera shows the nearest others as a camera wall. |
+| 🚨 **Licence-plate readers** | Flock Safety and other ALPR cameras mapped in OpenStreetMap (largely via DeFlock), with maker, operator and facing direction, a neutral Learn card on the privacy debate, and a live refresh from OpenStreetMap for the area you are viewing. |
+| 🛰 **Clickable satellites and the ISS** | Click any satellite for its orbit class, perigee and apogee, inclination and period, draw its full orbit, and get the next times it passes over you. |
+| 📍 **Map-style pins and names** | 2,500 city names and 3,300 airports appear as you zoom, like a web map. Close up, markers turn into icon pins with labels. Named places get a Wikipedia summary and photo. |
+| 👀 **Look around** | Any point: Street View, Google Earth 3D, Mapillary, open Panoramax street photos and the nearest live cameras. |
+| 🧭 **Navigation that behaves like Google Maps** | Dragging covers about one screen of ground at any zoom, each scroll notch changes height by about 15 %, double-click zooms in, arrows pan, `+`/`−` zoom, a locate-me button and a scale bar. Lines and markers keep the same on-screen size at every zoom. |
+| ⚡ **Faster start** | 2K textures first and 4K when idle, a procedural star field instead of a 900 kB image, a 30 % smaller 3D engine bundle, and capped pixel ratio on high-density screens. |
+
+> Camera lists and the licence-plate-reader snapshot are collected once a day by [`data.yml`](.github/workflows/data.yml) (run it once by hand after installing: `gh workflow run data.yml`). Flights, satellites and camera pictures are always live.
+
+---
+
 ## 🌍 What this is
 
 Terra Atlas turns [World Monitor](https://github.com/koala73/worldmonitor) — a real-time global intelligence dashboard — into an **educational 3D Earth that runs entirely from GitHub Pages**. There is no server, no database and no API key. Every live layer is fetched straight from a public, browser-friendly source (USGS, NASA, NOAA, CelesTrak, Open-Meteo, adsb.lol); every static layer comes from World Monitor’s own curated datasets.
@@ -89,7 +107,7 @@ flowchart LR
 - **Click anything.** Points, lines and areas open field notes. Bare ground opens a point probe (weather, elevation, local solar time, Sun elevation, nearest plate boundary). A country opens its fact card.
 - **Search** across 1,000+ features — cables, ports, data centres, countries, tours, layers — or press Enter to search the whole world with OpenStreetMap.
 - **Share a view.** The address bar always holds your camera, base map and layers, e.g. `app/#@26.5,56.3,0.35&b=imagery&l=waterways,routes`.
-- **Keyboard:** `/` search · `R` spin · `1–4` sensor looks · `T` tours · `Q` quiz · `M` measure · `Esc` close.
+- **Keyboard:** `/` search · arrows pan · `+`/`−` zoom · double-click zoom in · `R` spin · `1–4` sensor looks · `T` tours · `Q` quiz · `M` measure · `Esc` close.
 
 ---
 
@@ -100,7 +118,10 @@ flowchart LR
 | Live Earth | Earthquakes (depth-coloured, pulsing rings for M4.5+) | USGS | 5 min |
 | | Natural events + storm tracks | NASA EONET | 30 min |
 | | Aurora forecast | NOAA SWPC OVATION | 15 min |
-| | Aircraft near the view | adsb.lol → OpenSky fallback | 20 s |
+| | Live flights (worldwide or near view) + seatback flight view | OpenSky · adsb.lol · airplanes.live · adsbdb | 12 s – 60 s |
+| Cameras | Live traffic cameras (stills + live video) | Caltrans · NYC DOT · 511 Ontario · 511 Alberta | list daily, images live |
+| | Licence-plate readers (Flock and others) | OpenStreetMap / DeFlock · Overpass | daily + on demand |
+| Places | City names (zoom-dependent) · Airports | Natural Earth · OurAirports | static |
 | Sky and space | Day and night (terminator, subsolar point) | computed | 1 min |
 | | Space stations + ISS ground track | CelesTrak + SGP4 | 2 s |
 | | Satellite shells (brightest, weather, GPS, geostationary, Starlink) | CelesTrak + SGP4 | 3 s |
@@ -117,7 +138,7 @@ flowchart LR
 <table><tr>
 <td width="55%">
 
-**Nine lessons** on the [Learn page](https://normansrule.github.io/worldmonitor/learn/), each with the key equation, its sources and a button that opens the idea on the globe:
+**Eleven lessons** on the [Learn page](https://normansrule.github.io/worldmonitor/learn/), each with the key equation, its sources and a button that opens the idea on the globe:
 
 1. Plate tectonics and earthquakes — `E₂/E₁ = 10^(1.5·ΔM)`
 2. Orbits — Kepler’s third law, `T = 2π√(a³/μ)`
@@ -128,6 +149,8 @@ flowchart LR
 7. Great circles and map projections — haversine
 8. Reading satellite imagery — NASA GIBS / VIIRS
 9. Fluids — Navier–Stokes, stable fluids, Coriolis
+10. How flight tracking works — ADS-B and the standard atmosphere
+11. Cameras, maps and privacy
 
 </td>
 <td>
@@ -252,8 +275,8 @@ site/                       ← everything GitHub Pages serves
 ├── manifest.webmanifest  sw.js  icons/
 desktop/                    Tauri 2 desktop shell (packages site/)
 video/                      Remotion promo video
-tools/                      data export, setup, screenshots, GIF
-.github/workflows/          pages.yml · desktop.yml · video.yml
+tools/                      data export, camera + ALPR fetchers, setup, screenshots, GIF
+.github/workflows/          pages.yml · desktop.yml · video.yml · data.yml
 ```
 
 ---
@@ -273,9 +296,10 @@ tools/                      data export, setup, screenshots, GIF
 | [Magic UI](https://github.com/magicuidesign/magicui) · [React Bits](https://github.com/DavidHDev/react-bits) · [Motion Primitives](https://github.com/ibelick/motion-primitives) · [Animate UI](https://animate-ui.com/) | Effects re-implemented in plain CSS/JS: border beam, number ticker, marquee, split text, spotlight, tilt |
 | [Remotion](https://github.com/remotion-dev/remotion) | Promo video rendered from code |
 | [LLM Visualization](https://github.com/bbycroft/llm-viz) · [Transformer Explainer](https://github.com/poloclub/transformer-explainer) · [Bruno Simon’s folio](https://github.com/brunosimon/folio-2019) | Inspiration for narrated tours, “what / how / try” cards and playful 3D |
+| [hls.js](https://github.com/video-dev/hls.js) · Apache-2.0 | Live camera video |
 | [Tauri](https://github.com/tauri-apps/tauri) · MIT/Apache-2.0 | Desktop app |
 
-Data: USGS · NASA EONET · NASA GIBS (*we acknowledge the use of imagery provided by services from NASA’s Global Imagery Browse Services (GIBS), part of NASA’s Earth Science Data and Information System (ESDIS)*) · NOAA SWPC · CelesTrak · adsb.lol (ODbL) · OpenSky Network · Open-Meteo (CC BY 4.0) · REST Countries · World Bank (CC BY 4.0) · Wikipedia (CC BY-SA) · © OpenStreetMap contributors (ODbL) · Esri World Imagery · PB2002 plate boundaries (ODC-BY) · NASA Blue Marble and Black Marble. Full list with licences: [`docs/REFERENCES.md`](docs/REFERENCES.md).
+Data: Caltrans · NYC DOT · 511 Ontario · 511 Alberta · © OpenStreetMap contributors via DeFlock and Overpass · OpenSky Network · airplanes.live · adsbdb (routes looked up live, not stored) · OurAirports · Natural Earth · Panoramax (CC BY-SA) · USGS · NASA EONET · NASA GIBS (*we acknowledge the use of imagery provided by services from NASA’s Global Imagery Browse Services (GIBS), part of NASA’s Earth Science Data and Information System (ESDIS)*) · NOAA SWPC · CelesTrak · adsb.lol (ODbL) · OpenSky Network · Open-Meteo (CC BY 4.0) · REST Countries · World Bank (CC BY 4.0) · Wikipedia (CC BY-SA) · © OpenStreetMap contributors (ODbL) · Esri World Imagery · PB2002 plate boundaries (ODC-BY) · NASA Blue Marble and Black Marble. Full list with licences: [`docs/REFERENCES.md`](docs/REFERENCES.md).
 
 ## 📄 License
 

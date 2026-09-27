@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Terra Atlas service worker: the site itself works offline; live feeds and map tiles always go to the network.
-const VERSION = 'terra-atlas-v1';
+const VERSION = 'terra-atlas-v1.1';
 const SHELL = [
   './', 'app/', 'app/css/atlas.css', 'app/vendor/vendor.min.mjs',
-  'app/js/main.js', 'app/js/layers.js', 'app/js/feeds.js', 'app/js/astro.js', 'app/js/satellites.js', 'app/js/sources.js', 'app/js/tours.js', 'app/js/quiz.js',
-  'app/data/worldmonitor-static.json', 'app/data/countries.geojson', 'app/data/plate-boundaries.json', 'app/data/tle-snapshot-leo.txt',
-  'app/textures/earth-blue-marble.jpg', 'app/textures/earth-night.jpg', 'app/textures/earth-topology.png', 'app/textures/night-sky.png',
+  'app/js/main.js', 'app/js/layers.js', 'app/js/flights.js', 'app/js/cameras.js', 'app/js/places.js', 'app/js/nav.js', 'app/js/icons.js', 'app/js/feeds.js', 'app/js/astro.js', 'app/js/satellites.js', 'app/js/sources.js', 'app/js/tours.js', 'app/js/quiz.js',
+  'app/data/worldmonitor-static.json', 'app/data/countries.geojson', 'app/data/plate-boundaries.json', 'app/data/tle-snapshot-leo.txt', 'app/data/cities.json', 'app/data/airports.json',
+  'app/textures/earth-blue-marble-2k.jpg', 'app/textures/earth-night-2k.jpg', 'app/textures/earth-topology.png',
   'learn/', 'fluid/', 'download/', 'credits/', 'assets/site.css', 'assets/site.js', 'assets/vendor/gsap.min.js', 'assets/vendor/ScrollTrigger.min.js',
   'icons/icon-192.png', 'manifest.webmanifest',
 ];

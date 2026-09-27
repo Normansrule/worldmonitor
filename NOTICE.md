@@ -15,6 +15,8 @@ licence (see [`LICENSE`](LICENSE)). As required by section 5 of the AGPL, this f
 | 2026-09 | Added `video/` (Remotion promo), `.github/workflows/pages.yml`, `desktop.yml`, `video.yml`; parked upstream workflows in `.github/workflows-upstream/`. |
 | 2026-09 | Replaced `README.md` with the Terra Atlas README; the original is kept as `README.worldmonitor.md`. |
 
+| 2026-09 | v1.1: live flights with a seatback flight view, public traffic cameras and OpenStreetMap-mapped licence-plate readers (`tools/fetch-cameras.mjs`, `tools/fetch-alpr.mjs`, `.github/workflows/data.yml`), clickable satellites, city and airport layers, map-style pins and navigation, and faster loading. |
+
 Nothing under `src/`, `server/`, `api/`, `shared/` or other upstream directories has been changed.
 "World Monitor" is the original author's project name; Terra Atlas does not use it as its own brand.
 
