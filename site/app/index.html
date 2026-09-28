@@ -23,7 +23,7 @@
   <header class="topbar">
     <a class="brand" href="#" id="brand" title="Back to the whole Earth">
       <svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="27" /><path d="M5 32h54M32 5c11 9 11 45 0 54M32 5c-11 9-11 45 0 54" /></svg>
-      <span>Terra Atlas</span><small class="ver">v1.4</small>
+      <span>Terra Atlas</span><small class="ver">v1.5</small>
     </a>
     <form class="search" id="search" role="search">
       <label class="sr" for="q">Search places and layers</label>
@@ -79,6 +79,8 @@
       <label class="toggle" title="Switch to high-resolution tiles automatically when you zoom close"><input type="checkbox" id="autodetail" checked /> Auto detail</label>
       <button class="icon" id="spin" title="Auto-rotate (R)" aria-pressed="false">⟳</button>
       <button class="icon" id="shot" title="Save a picture of the globe">⤓</button>
+      <label class="quality" title="Rendering quality — Auto steps down if the frame rate drops"><span id="fps">— fps</span>
+        <select id="quality" aria-label="Rendering quality"><option value="auto">Auto</option><option value="high">High</option><option value="balanced">Balanced</option><option value="fast">Fast</option></select></label>
       <button class="icon mobile-only" id="open-layers" title="Layers">≡</button>
     </div>
     <div class="attribution" id="attribution"></div>

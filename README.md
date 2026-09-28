@@ -23,6 +23,18 @@ Built on [World Monitor](https://github.com/koala73/worldmonitor) by Elie Habib.
 
 ---
 
+## ⚡ New in v1.5 — fast and detailed
+
+| | |
+|---|---|
+| **New marker engine** | Every column from every layer is now one instanced mesh (one draw call), and pins and place names are cached canvas sprites instead of DOM elements and 3D text. In a test with 11 layers on over Los Angeles, draw calls fell from 778 to 164 and the freeze after the camera stopped fell from 11.4 s to none over 50 ms. |
+| **Map-style pins** | The nearest markers become teardrop pins with icons; the closest get a label card (name and details), cards never overlap, and markers too close together fold into a “+N” cluster badge — like a web map. |
+| **Hover cards everywhere** | Point at anything for its details. Hover and click use a latitude/longitude grid index, so finding the thing under the cursor takes microseconds instead of projecting every marker. |
+| **No more freezing** | Work after a camera move is split into small slices that yield to the browser between layers, and a newer move cancels the older one. Marker shaders are compiled up front, particle sets are reused, and ray-casting is switched off for the big custom objects. |
+| **Quality governor** | Bottom right: a live frame-rate meter and Auto / High / Balanced / Fast. Auto steps down on slow devices (fewer pins, cards and columns, lower pixel ratio, no atmosphere). |
+
+---
+
 ## ◎ New in v1.4 — the connected planet
 
 | | |
@@ -300,7 +312,7 @@ flowchart LR
 site/                       ← everything GitHub Pages serves
 ├── index.html              landing page (GSAP, live hero globe)
 ├── app/                    the Terra Atlas globe app
-│   ├── js/                 main, layers, feeds, astro, satellites, tours, quiz, sources
+│   ├── js/                 main, layers, markers (fast renderer), perf, feeds, astro, satellites, flights, cameras, crime, news, networks, hud, live, places, nav, tours, quiz, sources
 │   ├── data/               World Monitor export, countries, plates, TLE snapshot
 │   ├── textures/           NASA day, night, relief, star field
 │   └── vendor/             globe.gl + three.js + satellite.js bundle

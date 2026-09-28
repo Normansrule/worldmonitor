@@ -77,7 +77,7 @@ function ensureMesh() {
   if (mesh) return mesh;
   mesh = new THREE.InstancedMesh(planeGeometry(), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }), MAX);
   mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX * 3), 3);
-  mesh.frustumCulled = false; mesh.count = 0; mesh.renderOrder = 5;
+  mesh.frustumCulled = false; mesh.count = 0; mesh.renderOrder = 5; mesh.raycast = () => {};
   return mesh;
 }
 const tmp = { m: new THREE.Matrix4(), p: new THREE.Vector3(), n: new THREE.Vector3(), e: new THREE.Vector3(), u: new THREE.Vector3(), d: new THREE.Vector3(), r: new THREE.Vector3(), c: new THREE.Color() };

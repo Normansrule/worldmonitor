@@ -57,7 +57,7 @@ export const crimeLayer = {
       return { points: CITIES.map((c) => ({ lat: c.lat, lng: c.lng, alt: 0.02, r: 0.5, color: '#f07a63', label: `${c.name} crime map`, tip: `<div class="tip"><b>${c.name}</b><span>Click to open the crime map</span></div>`, ref: { layer: 'crime', d: { goto: c } } })) };
     }
     const v = ctx.view;
-    const shown = d.rows.filter((r) => haversineKm(v.lat, v.lng, r.lat, r.lng) < v.radiusKm * 1.1);
+    const shown = d.rows.filter((r) => Math.abs(r.lat - v.lat) * 111 < v.radiusKm * 1.1 && haversineKm(v.lat, v.lng, r.lat, r.lng) < v.radiusKm * 1.1);
     return {
       hexes: shown.map((r) => ({ lat: r.lat, lng: r.lng, w: 1, color: crimeGroup(r.cat)[1] })),
       points: shown.slice(0, 800).map((r) => { const [g, color] = crimeGroup(r.cat); return { lat: r.lat, lng: r.lng, alt: 0.003, r: 0.05, color, label: titleCase(r.cat), tip: `<div class="tip"><b>${esc(titleCase(r.cat))}</b><span>${esc(g)} · ${esc(fmtDate(r.t))}</span></div>`, ref: { layer: 'crime', d: { ...r, city: d.city } } }; }),

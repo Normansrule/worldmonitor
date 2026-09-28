@@ -20,8 +20,10 @@ import { installLive } from './live.js';
 import { openWall } from './cameras.js';
 import { powerLayer, internetLayer, radioLayer, shipsLayer, overlayLayer } from './networks.js';
 import { installHud } from './hud.js';
+import { MarkerRenderer, GeoIndex, iconsReady } from './markers.js';
+import { installPerformance } from './perf.js';
 import { smallCircle } from './astro.js';
-export const VERSION = '1.4';
+export const VERSION = '1.5';
 const NEW_VERSION = (() => { try { return localStorage.getItem('terra-atlas-version') !== VERSION; } catch { return false; } })();
 
 import { ICONS } from './icons.js';
@@ -57,6 +59,8 @@ const TEX = {
   bluemarble: { img: 'textures/earth-blue-marble.jpg', bump: 'textures/earth-topology.png', attr: 'NASA Blue Marble, relief from three-globe' },
   night: { img: 'textures/earth-night.jpg', attr: 'NASA Black Marble city lights' },
 };
+let markers = null;
+let perf = { q: { pins: 140, pinsPerLayer: 40, cards: 24, labels: 120, columns: 30000 }, moving() {} };
 readHash();
 
 // ------------------------------------------------------------------ globe
@@ -100,7 +104,7 @@ const nightShade = new THREE.Mesh(
     fragmentShader: 'uniform vec3 sunDir; varying vec3 vNormal; void main() { float i = dot(normalize(vNormal), normalize(sunDir)); gl_FragColor = vec4(0.01, 0.03, 0.08, (1.0 - smoothstep(-0.12, 0.08, i)) * 0.58); }',
   }),
 );
-nightShade.visible = false;
+nightShade.visible = false; nightShade.raycast = () => {};
 function updateShade() { nightShade.visible = state.on.has('sun') && state.base !== 'daynight'; }
 function updateSun() {
   const s = astro.subsolarPoint(new Date());
@@ -116,11 +120,10 @@ function applyZoomScale(force = false) {
   const a = state.pov.altitude;
   if (!force && Math.abs(Math.log(a / zkAlt)) < 0.3) return;
   zkAlt = a;
-  globe.pointRadius((d) => d.r * Math.max(zk(), 0.02 * (d.minR ?? 0)))
-    .pathStroke((d) => (d.stroke == null ? null : d.stroke * zk()))
+  markers?.rescale(zk());
+  globe.pathStroke((d) => (d.stroke == null ? null : d.stroke * zk()))
     .arcStroke((d) => (d.stroke == null ? null : d.stroke * zk()))
-    .ringMaxRadius((d) => d.maxR * zk())
-    .labelSize((d) => d.size * (d.fixed ? 1 : Math.max(zk(), 0.35)));
+    .ringMaxRadius((d) => d.maxR * zk());
 }
 function dominant(points, a) {
   const n = {}; for (const p of points) n[p.color] = (n[p.color] ?? 0) + 1;
@@ -164,7 +167,7 @@ globe
   .onLabelClick((d) => d.ref && select(d.ref))
   // particles (satellites, aurora)
   .particlesList('pts').particleLat('lat').particleLng('lng').particleAltitude('alt')
-  .particlesColor('color').particlesSize('size').particlesSizeAttenuation(false)
+  .particlesColor('color').particlesSize('size').particlesSizeAttenuation(false).particleLabel(() => '').customLayerLabel(() => '')
   // html (pins)
   .htmlLat('lat').htmlLng('lng').htmlAltitude((d) => d.alt ?? 0).htmlElement('el').htmlTransitionDuration(0)
   // hexagon columns (crime density)
@@ -182,6 +185,10 @@ setTimeout(() => $('#loading').classList.add('gone'), 8000);
 restylePolygons();
 zkAlt = state.pov.altitude; applyZoomScale(true);
 globe.scene().add(nightShade);
+markers = new MarkerRenderer(globe);
+globe.scene().add(markers.object);
+setTimeout(() => markers.warm(globe.renderer(), globe.scene(), globe.camera()), 1200);
+iconsReady.then(() => { compose.last.points = null; scheduleCompose(); });
 const controls = globe.controls();
 controls.autoRotateSpeed = 0.35;
 globe.renderer().setPixelRatio(Math.min(devicePixelRatio, 1.75)); // 4K phones don't need 3× pixels for a globe
@@ -242,7 +249,7 @@ function applyBase() {
 async function refreshLayer(id, { soft = false } = {}) {
   const l = layerById[id];
   if (!l || !state.on.has(id)) return;
-  if (soft && state.data[id]) { state.chan[id] = l.channels(state.data[id], ctx()); return compose(); }
+  if (soft && state.data[id]) { state.chan[id] = l.channels(state.data[id], ctx()); return scheduleCompose(); }
   const first = !state.data[id];
   if (first) setLStatus(id, 'loading');
   try {
@@ -276,6 +283,7 @@ function outlineMesh(key, features, color = 0xeef3f6, opacity = 0.3, alt = 0.004
   }
   const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   const obj = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false }));
+  obj.raycast = () => {};
   meshCache[key] = { obj };
   return meshCache[key];
 }
@@ -298,6 +306,8 @@ function countryAt(lat, lng) {
   return null;
 }
 
+let composeQueued = false;
+function scheduleCompose() { if (composeQueued) return; composeQueued = true; requestAnimationFrame(() => { composeQueued = false; compose(); }); }
 function compose() {
   const acc = { points: [], rings: [], paths: [], arcs: [], polygons: [], labels: [], particles: [], html: [], custom: [], pick: [], hexes: [] };
   for (const l of LAYERS) {
@@ -307,10 +317,13 @@ function compose() {
     for (const k of Object.keys(acc)) if (ch[k]) acc[k].push(...ch[k]);
   }
   for (const k of Object.keys(state.tool)) acc[k].push(...state.tool[k]);
-  makePins(acc);
+  document.body.classList.toggle('close', state.pov.altitude < 0.025);
   // Only hand globe.gl the channels whose contents actually changed — re-digesting
   // unchanged paths/polygons every tick is what makes globes stutter.
+  const markerDirty = ['points', 'labels', 'pick'].some((k) => { const prev = compose.last[k]; const sig = acc[k]; return !(prev && prev.length === sig.length && prev.every((x, i) => x === sig[i])); }) || compose.forceMarkers;
+  if (markerDirty) { compose.forceMarkers = false; for (const k of ['points', 'labels', 'pick']) compose.last[k] = acc[k]; markerPass(acc); }
   for (const k of Object.keys(acc)) {
+    if (k === 'points' || k === 'labels' || k === 'pick') continue;
     const sig = acc[k];
     const prev = compose.last[k];
     if (prev && prev.length === sig.length && prev.every((x, i) => x === sig[i])) continue;
@@ -321,37 +334,75 @@ function compose() {
 
 compose.last = {};
 
-// Icon pins: when you are close enough, the nearest markers of each layer turn into labelled map pins.
-const pinCache = new WeakMap(); const pinDatum = new WeakMap();
-function makePins(acc) {
-  const v = viewOf(state.pov); document.body.classList.toggle('close', v.altitude < 0.025);
-  if (v.altitude > 1.1) return;
-  const keep = []; const pins = []; const perLayer = {};
-  const scored = acc.points.map((p) => ({ p, km: astro.haversineKm(v.lat, v.lng, p.lat, p.lng) }));
-  scored.sort((a, b) => a.km - b.km);
-  for (const { p, km } of scored) {
-    const l = p.ref && layerById[p.ref.layer];
-    const icon = l?.pin && (typeof l.pin === 'function' ? l.pin(p.ref.d) : l.pin);
-    if (!icon || km > v.radiusKm || pins.length >= 180 || (perLayer[l.id] = (perLayer[l.id] ?? 0) + 1) > 45) { keep.push(p); continue; }
-    let el = pinCache.get(p.ref.d);
-    if (!el) {
-      el = document.createElement('button'); el.className = 'pinx'; el.type = 'button';
-      el.style.setProperty('--c', p.color?.startsWith?.('#') ? p.color : l.swatch);
-      el.innerHTML = `<span class="g">${ICONS[icon] ?? ICONS.pin}</span><b>${esc(p.label ?? plainTip(p.tip))}</b>`;
-      el.addEventListener('click', (e) => { e.stopPropagation(); state.hitAt = performance.now(); select(p.ref); });
-      el.title = plainTip(p.tip);
-      pinCache.set(p.ref.d, el);
+// ---- Fast markers: columns in one instanced mesh, the nearest markers as sprite pins (with a label card
+// for the closest ones), names as cached sprites, and a lat/lng grid index for hover and click.
+state.index = new GeoIndex(0.5); state.elevated = [];
+function markerPass(acc) {
+  const v = viewOf(state.pov); const q = perf.q;
+  const pts = acc.points; const labels = acc.labels;
+  const pins = []; const cols = [];
+  if (v.altitude <= 1.1) {
+    const perLayer = {}; const lat0 = v.lat; const cosl = Math.cos(lat0 * Math.PI / 180);
+    const cand = [];
+    for (const p of pts) {
+      const l = p.ref && layerById[p.ref.layer];
+      if (!l?.pin) { cols.push(p); continue; }
+      const dy = (p.lat - lat0) * 111; const dx = (p.lng - v.lng) * 111 * cosl; const km = Math.sqrt(dx * dx + dy * dy);
+      if (km > v.radiusKm) { cols.push(p); continue; }
+      cand.push({ p, km, l });
     }
-    let dt = pinDatum.get(el); if (!dt) { dt = { el }; pinDatum.set(el, dt); } // stable datum → globe.gl keeps the same DOM node
-    dt.lat = p.lat; dt.lng = p.lng; dt.alt = p.alt ?? 0.005;
-    pins.push(dt);
+    cand.sort((x, y) => x.km - y.km);
+    // Declutter in screen space, like a web map: the nearest markers win, cards never overlap,
+    // and markers too close to a kept one fold into it as a "+N" cluster badge.
+    const placed = []; const cards = [];
+    for (const c of cand) {
+      if (pins.length >= q.pins || (perLayer[c.l.id] ?? 0) >= q.pinsPerLayer) { cols.push(c.p); continue; }
+      const sc = globe.getScreenCoords(c.p.lat, c.p.lng, Math.min(c.p.alt ?? 0.005, 0.02));
+      if (!sc || sc.x < -40 || sc.y < -40 || sc.x > innerWidth + 40 || sc.y > innerHeight + 40) { cols.push(c.p); continue; }
+      const hitsCard = cards.some((r) => sc.x + 12 > r.x0 && sc.x - 12 < r.x1 && sc.y > r.y0 && sc.y - 34 < r.y1);
+      const near = placed.find((o) => Math.abs(o.x - sc.x) < 22 && Math.abs(o.y - sc.y) < 26) ?? (hitsCard ? placed.reduce((b, o) => (!b || Math.hypot(o.x - sc.x, o.y - sc.y) < Math.hypot(b.x - sc.x, b.y - sc.y) ? o : b), null) : null);
+      if (near) { near.pin.more = (near.pin.more ?? 0) + 1; cols.push(c.p); continue; }
+      perLayer[c.l.id] = (perLayer[c.l.id] ?? 0) + 1;
+      const icon = typeof c.l.pin === 'function' ? c.l.pin(c.p.ref.d) : c.l.pin;
+      const [title, sub] = tipParts(c.p);
+      const rect = { x0: sc.x, x1: sc.x + 36 + Math.min(240, 7.2 * Math.max(title.length, sub.length * 0.9)), y0: sc.y - 44, y1: sc.y - 12 };
+      const cardFree = cards.length < q.cards && !cards.some((r) => r.x0 < rect.x1 && rect.x0 < r.x1 && r.y0 < rect.y1 && rect.y0 < r.y1)
+        && !placed.some((o) => o.x + 12 > rect.x0 + 30 && o.x - 12 < rect.x1 && o.y > rect.y0 && o.y - 34 < rect.y1);
+      if (cardFree) cards.push(rect);
+      const pin = { lat: c.p.lat, lng: c.p.lng, alt: Math.min(c.p.alt ?? 0.005, 0.02), icon, color: solid(c.p.color, c.l.swatch), title, sub, detailed: cardFree, ref: c.p.ref, tip: c.p.tip };
+      pins.push(pin); placed.push({ x: sc.x, y: sc.y, pin });
+    }
+  } else cols.push(...pts);
+  const lbl = labels.slice(0, q.labels).map((l) => ({ lat: l.lat, lng: l.lng, alt: l.alt ?? 0.004, text: l.text, color: solid(l.color, '#eef3f6'), size: l.px ? l.size : Math.max(11, Math.min(16, (l.size ?? 1) * 12)), ref: l.ref, tip: l.tip }));
+  markers.setPoints(cols.length > q.columns ? cols.slice(0, q.columns) : cols, zk());
+  markers.setSprites(pins, lbl);
+  // index for hover/click; things well above the ground are picked in screen space instead
+  const idx = new GeoIndex(v.altitude < 0.05 ? 0.05 : v.altitude < 0.5 ? 0.25 : 1); const elevated = [];
+  const addP = (p) => { if (!p.ref) return; if ((p.alt ?? 0) > 0.03) elevated.push(p); else idx.add(p); };
+  pts.forEach(addP); lbl.forEach(addP); acc.pick.forEach(addP);
+  state.index = idx; state.elevated = elevated;
+  cullSprites();
+}
+function tipParts(p) {
+  const m = /<b>([\s\S]*?)<\/b>(?:<span>([\s\S]*?)<\/span>)?/.exec(p.tip ?? '');
+  const clean = (x) => (x ?? '').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim();
+  return [clean(m?.[1]) || p.label || '', clean(m?.[2])];
+}
+const solid = (c, fb) => (typeof c === 'string' && (c.startsWith('#') || c.startsWith('rgb')) ? c.replace(/rgba\(([^,]+),([^,]+),([^,]+),[^)]+\)/, 'rgb($1,$2,$3)') : fb);
+// Hide sprites on the far side of the planet (sprites ignore depth so they never clip into the ground).
+function cullSprites() {
+  const c = globe.camera().position; const cl = c.length();
+  for (const sp of markers.pool) {
+    if (!sp.userData.d) continue;
+    const want = sp.userData.d && markers.pins.concat(markers.labels).includes(sp.userData.d);
+    if (!want) { sp.visible = false; continue; }
+    const p = sp.position; sp.visible = (p.x * c.x + p.y * c.y + p.z * c.z) / (p.length() * cl) > (R * 1.0) / cl - 0.002;
   }
-  acc.points = keep; acc.html.push(...pins);
 }
 const plainTip = (t) => String(t ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
 const SETTERS = {
-  points: (d) => globe.pointsData(d), rings: (d) => globe.ringsData(d), paths: (d) => globe.pathsData(d), arcs: (d) => globe.arcsData(d),
-  polygons: (d) => globe.polygonsData(d), labels: (d) => globe.labelsData(d), particles: (d) => globe.particlesData(d),
+  rings: (d) => globe.ringsData(d), paths: (d) => globe.pathsData(d), arcs: (d) => globe.arcsData(d),
+  polygons: (d) => globe.polygonsData(d), particles: (d) => globe.particlesData(d),
   html: (d) => globe.htmlElementsData(d), custom: (d) => globe.customLayerData(d), pick: () => {},
   hexes: (d) => globe.hexBinResolution(state.pov.altitude < 0.006 ? 9 : state.pov.altitude < 0.02 ? 8 : state.pov.altitude < 0.07 ? 7 : 6).hexBinPointsData(d),
 };
@@ -575,7 +626,7 @@ document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('cli
 
 // ------------------------------------------------------------------ surface clicks: probe + country card
 function surfaceClick(lat, lng, country) {
-  if (performance.now() - (state.hitAt ?? 0) < 500) return;
+  if (state.clickConsumed) return; // a marker already handled this click (globe.gl's own click can arrive a frame later)
   if (state.mode === 'measure') return measureClick(lat, lng);
   if (state.mode === 'quiz') return quizClick(lat, lng);
   if (state.mode === 'tours') return;
@@ -927,6 +978,8 @@ function onCamera(pov) {
   state.pov = pov;
   nav.tune(pov.altitude);
   if (state.on.has('aircraft') && Math.abs(Math.log(pov.altitude / prevAlt)) > 0.02) layoutPlanes(globe, pov.altitude);
+  if (!onCamera.raf) onCamera.raf = requestAnimationFrame(() => { onCamera.raf = 0; cullSprites(); if (Math.abs(Math.log(state.pov.altitude / zkAlt)) > 0.12) { zkAlt = state.pov.altitude; markers.rescale(zk()); } });
+  perf?.moving();
   clearTimeout(onCamera.v); onCamera.v = setTimeout(viewSettled, 280);
   if (!cursor) showReadout(pov.lat, pov.lng);
   $('#ro-alt').textContent = `eye ${Math.round(pov.altitude * astro.R_EARTH_KM).toLocaleString()} km`;
@@ -938,25 +991,45 @@ function onCamera(pov) {
   clearTimeout(onCamera.t); onCamera.t = setTimeout(writeHash, 500);
 }
 // After the camera stops: refresh the layers that depend on what is in view (city names, pins, cameras…).
-function viewSettled() {
+// Work is split into small slices with a yield between layers, so the page never locks up.
+const yieldToBrowser = () => new Promise((r) => (window.scheduler?.yield ? window.scheduler.yield().then(r) : setTimeout(r, 0)));
+let settleRun = 0;
+async function viewSettled() {
+  const run = ++settleRun;
   applyZoomScale();
   for (const l of LAYERS) {
     if (!l.viewDependent || !state.on.has(l.id) || !state.data[l.id]) continue;
+    await yieldToBrowser(); if (run !== settleRun) return; // a newer camera move superseded this one
     if (l.reloadOnView) refreshLayer(l.id); else state.chan[l.id] = l.channels(state.data[l.id], ctx());
   }
-  compose();
+  compose.forceMarkers = true; compose();
 }
 // Screen-space picking for things drawn as particles or instances (planes, satellites, cameras from afar).
 let downAt = null;
-$('#globe').addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; }, true);
+$('#globe').addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; state.clickConsumed = false; }, true);
 $('#globe').addEventListener('pointerup', (e) => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5 || state.mode === 'measure' || state.mode === 'quiz') return;
   if (e.target.closest?.('.pinx')) return;
   const rect = $('#globe').getBoundingClientRect(); const x = e.clientX - rect.left; const y = e.clientY - rect.top;
+  const hit = pickAt(x, y);
+  if (hit) { state.hitAt = performance.now(); state.clickConsumed = true; select(hit.ref); }
+}, true);
+function kmPerPx() { const fov = (globe.camera().fov * Math.PI) / 180; return Math.max(0.0005, (2 * state.pov.altitude * astro.R_EARTH_KM * Math.tan(fov / 2)) / innerHeight); }
+const occludedFn = () => { const c = globe.camera().position; const cl = c.length(); return (d) => { const w = globe.getCoords(d.lat, d.lng, d.alt ?? 0); return (w.x * c.x + w.y * c.y + w.z * c.z) / (Math.hypot(w.x, w.y, w.z) * cl) < R / cl - 0.002; }; };
+function pickAt(x, y, { elevated = true } = {}) {
+  const pin = markers.hitPin(x, y, occludedFn()); if (pin) return pin;
+  const g = globe.toGlobeCoords(x, y);
+  if (g) { const n = state.index.nearest(g.lat, g.lng, kmPerPx() * 9); if (n) return n.item; }
+  if (!elevated) return null;
   const cam = globe.camera().position; const cr = cam.length();
   let best = null; let bestD = 11;
+  for (const p of state.elevated) {
+    const s2 = globe.getScreenCoords(p.lat, p.lng, p.alt); if (!s2) continue;
+    const d = Math.hypot(s2.x - x, s2.y - y); if (d < bestD) { best = p; bestD = d; }
+  }
+  if (best) return best;
   for (const l of LAYERS) {
-    const pk = state.on.has(l.id) && state.chan[l.id]?.pick; if (!pk) continue;
+    const pk = state.on.has(l.id) && l.pickScreen !== false && ['aircraft', 'satellites'].includes(l.id) && state.chan[l.id]?.pick; if (!pk) continue;
     for (const p of pk) {
       const s = globe.getScreenCoords(p.lat, p.lng, p.alt); if (!s) continue;
       const d = Math.hypot(s.x - x, s.y - y); if (d >= bestD) continue;
@@ -967,8 +1040,18 @@ $('#globe').addEventListener('pointerup', (e) => {
       best = p; bestD = d;
     }
   }
-  if (best) { state.hitAt = performance.now(); select(best.ref); }
-}, true);
+  return best;
+}
+// Hover tooltips from the same index (throttled).
+let hoverAt = 0; const tipEl = document.createElement('div'); tipEl.className = 'hovertip'; tipEl.hidden = true; document.body.appendChild(tipEl);
+$('#globe').addEventListener('pointermove', (e) => {
+  const now = performance.now(); if (now - hoverAt < 70) return; hoverAt = now;
+  const rect = $('#globe').getBoundingClientRect(); const x = e.clientX - rect.left; const y = e.clientY - rect.top;
+  const h = pickAt(x, y, { elevated: false });
+  if (h?.tip) { tipEl.innerHTML = h.tip; tipEl.hidden = false; tipEl.style.transform = `translate(${Math.min(e.clientX + 14, innerWidth - 300)}px, ${e.clientY + 14}px)`; $('#globe').style.cursor = 'pointer'; }
+  else { tipEl.hidden = true; if (!state.hover) $('#globe').style.cursor = state.mode === 'measure' || state.mode === 'quiz' ? 'crosshair' : ''; }
+});
+$('#globe').addEventListener('pointerleave', () => { tipEl.hidden = true; });
 let cursor = null;
 function showReadout(lat, lng) { $('#ro-lat').textContent = astro.fmtLat(lat); $('#ro-lng').textContent = astro.fmtLng(lng); }
 $('#globe').addEventListener('pointermove', (e) => {
@@ -1072,13 +1155,16 @@ for (const id of state.on) refreshLayer(id);
 $('#apply-now').addEventListener('click', applyPending);
 $('#apply-undo').addEventListener('click', () => { state.pending.clear(); renderLayerPanel(); });
 const live = installLive(api);
+perf = installPerformance({ globe, $, toast: (m) => toast(m), onChange: () => { compose.forceMarkers = true; scheduleCompose(); } });
 hud = installHud(api);
 if (state.look === 'hud') hud.show(true);
 if (NEW_VERSION) { setTimeout(whatsNew, 600); try { localStorage.setItem('terra-atlas-version', VERSION); } catch { /* private mode */ } }
 else if (!location.hash.includes('@') && !isMobile) welcome();
 function whatsNew() {
-  openNotes(`What’s new in v${VERSION}`, `<h3>The connected planet</h3>
-    <p class="sub">v1.4 adds the Overwatch HUD, NASA satellite overlays, power plants, internet buildings, live radio receivers and ships.</p>
+  openNotes(`What’s new in v${VERSION}`, `<h3>Faster, smoother, more detail</h3>
+    <p class="sub">v1.5 rebuilds how markers are drawn: one draw call for every column, pins and names as cached sprites, map-style decluttering with “+N” cluster badges, label cards on the nearest pins, hover cards everywhere, work split into small slices so the page never freezes, and an automatic quality governor (bottom right, with a live frame-rate meter).</p>
+    <h4>From v1.4 — the connected planet</h4>
+    <p class="sub">v1.4 added the Overwatch HUD, NASA satellite overlays, power plants, internet buildings, live radio receivers and ships.</p>
     <div class="starts">
       <button class="tour-card" data-start="hud"><b>◎ Overwatch HUD + Area scan</b><span>A heads-up display over the globe; press S to scan everything around the crosshair — flights, satellites overhead, cameras, networks, power, weather.</span></button>
       <button class="tour-card" data-start="rain"><b>☂ Rain falling right now</b><span>NASA’s 30-minute global precipitation wrapped around the globe. Also clouds, fires, night lights, ocean temperature, smoke, snow.</span></button>
@@ -1131,4 +1217,4 @@ if (window.__TAURI_INTERNALS__) {
     if (a && new URL(a.href).origin !== location.origin) { e.preventDefault(); window.__TAURI_INTERNALS__.invoke('plugin:opener|open_url', { url: a.href }); }
   });
 }
-window.terraAtlas = { live, applyPending, preset, VERSION, globe, state, setBase, toggleLayer, startTour, setMode, select, showLearn, surfaceClick, countryAt, setLook, refreshLayer, flightState }; // for tinkering in the console
+window.terraAtlas = { pickAt: (x, y) => pickAt(x, y), live, applyPending, preset, VERSION, globe, state, setBase, toggleLayer, startTour, setMode, select, showLearn, surfaceClick, countryAt, setLook, refreshLayer, flightState }; // for tinkering in the console

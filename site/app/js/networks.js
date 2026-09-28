@@ -7,7 +7,7 @@ import { haversineKm, fmtLat, fmtLng } from './astro.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const tip = (t, s = '') => `<div class="tip"><b>${esc(t)}</b>${s ? `<span>${esc(s)}</span>` : ''}</div>`;
-const inView = (v, lat, lng) => haversineKm(v.lat, v.lng, lat, lng) < v.radiusKm;
+const inView = (v, lat, lng) => Math.abs(lat - v.lat) * 111 < v.radiusKm && haversineKm(v.lat, v.lng, lat, lng) < v.radiusKm; // cheap latitude test first
 
 // --------------------------------------------------------------- power plants (WRI)
 export const FUEL = { Coal: '#8a8f98', Gas: '#ffb15e', Oil: '#b0703c', Nuclear: '#9ff0c9', Hydro: '#4aa3ff', Wind: '#d9f2ff', Solar: '#ffe066', Geothermal: '#ff6f61', Biomass: '#7fc97f', Waste: '#b39ddb', Cogeneration: '#e0a05a', Other: '#cccccc', Storage: '#80deea', Petcoke: '#6d6d6d', 'Wave and Tidal': '#26c6da' };
@@ -60,9 +60,9 @@ export const radioLayer = {
   channels(rs, ctx) {
     const v = ctx.view;
     return {
-      particles: [{ color: '#b7a3ff', size: 2, pts: rs.map((r) => ({ lat: r.lat, lng: r.lng, alt: 0.002 })) }],
+      particles: (rs._particles ??= [{ color: '#b7a3ff', size: 2, pts: rs.map((r) => ({ lat: r.lat, lng: r.lng, alt: 0.002 })) }]),
       points: (v.altitude < 1.3 ? rs.filter((r) => inView(v, r.lat, r.lng)) : []).slice(0, 600).map((r) => ({ lat: r.lat, lng: r.lng, alt: 0.006, r: 0.1, color: '#b7a3ff', label: r.loc || r.name, tip: tip(r.name, `${r.users}/${r.max} listeners · ${r.antenna}`), ref: { layer: 'radio', d: r } })),
-      pick: rs.map((r) => ({ lat: r.lat, lng: r.lng, alt: 0.002, ref: { layer: 'radio', d: r } })),
+      pick: (rs._pick ??= rs.map((r) => ({ lat: r.lat, lng: r.lng, alt: 0.002, ref: { layer: 'radio', d: r } }))),
     };
   },
   describe(r) {
@@ -91,9 +91,9 @@ export const shipsLayer = {
   channels(ss, ctx) {
     const v = ctx.view;
     return {
-      particles: [{ color: '#4aa3ff', size: 1.8, pts: ss.map((s) => ({ lat: s.lat, lng: s.lng, alt: 0.0015 })) }],
+      particles: (ss._particles ??= [{ color: '#4aa3ff', size: 1.8, pts: ss.map((s) => ({ lat: s.lat, lng: s.lng, alt: 0.0015 })) }]),
       points: (v.altitude < 0.6 ? ss.filter((s) => inView(v, s.lat, s.lng)) : []).slice(0, 1200).map((s) => ({ lat: s.lat, lng: s.lng, alt: 0.003, r: 0.05, color: s.sog > 0.5 ? '#4aa3ff' : '#9fc3e6', label: s.meta?.name ?? String(s.mmsi), tip: tip(s.meta?.name ?? `MMSI ${s.mmsi}`, `${s.sog ?? 0} kn · ${NAV[s.nav] ?? '—'}`), ref: { layer: 'ships', d: s } })),
-      pick: ss.map((s) => ({ lat: s.lat, lng: s.lng, alt: 0.0015, ref: { layer: 'ships', d: s } })),
+      pick: (ss._pick ??= ss.map((s) => ({ lat: s.lat, lng: s.lng, alt: 0.0015, ref: { layer: 'ships', d: s } }))),
     };
   },
   describe(s) {
@@ -137,7 +137,7 @@ export function overlayLayer(api) {
       if (!shell) {
         shell = new THREE.Mesh(new THREE.SphereGeometry(100 * 1.0012, 160, 80), new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false }));
         shell.rotation.y = -Math.PI / 2; // three-globe's texture alignment
-        shell.renderOrder = 1;
+        shell.renderOrder = 1; shell.raycast = () => {};
       }
       shell.material.map = d.tex; shell.material.opacity = d.opacity; shell.material.needsUpdate = true;
       return { custom: [SHELL] };

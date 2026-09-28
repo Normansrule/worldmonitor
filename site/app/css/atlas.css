@@ -322,3 +322,10 @@ body.hud-on .notes.open ~ #hud .hud-tr, .notes.open ~ #hud .hud-tr { right: 396p
 .nearest button { background: none; border: 0; color: var(--paper); text-align: left; cursor: pointer; padding: 4px 0; font: inherit; }
 .nearest button:hover b { color: var(--seaglass); }
 @media (max-width: 860px) { #hud .hud-tl, #hud .hud-bl { left: 12px; } #hud .hud-tr { right: 12px; top: 160px; } }
+
+/* ---------- v1.5: fast markers, hover cards, quality ---------- */
+.hovertip { position: fixed; left: 0; top: 0; z-index: 9; pointer-events: none; max-width: 300px; will-change: transform; }
+.hovertip[hidden] { display: none; }
+.quality { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--mist); padding: 0 4px; }
+.quality select { background: var(--chart); border: 1px solid var(--rule); border-radius: 6px; padding: 2px 4px; font-size: 12px; }
+#fps { font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }

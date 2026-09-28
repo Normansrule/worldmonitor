@@ -17,12 +17,12 @@ export const citiesLayer = {
     const v = ctx.view; const a = v.altitude;
     // How many names to show depends on zoom, like a web map: capitals and megacities first.
     const max = a > 1.6 ? 45 : a > 0.8 ? 80 : a > 0.3 ? 110 : 140;
-    const shown = cs.filter((c) => haversineKm(v.lat, v.lng, c.lat, c.lng) < v.radiusKm * 1.05).slice(0, max);
+    const shown = cs.filter((c) => Math.abs(c.lat - v.lat) * 111 < v.radiusKm * 1.05 && haversineKm(v.lat, v.lng, c.lat, c.lng) < v.radiusKm * 1.05).slice(0, max);
     const base = Math.max(0.012, Math.min(1.3, a * 0.34));
     return {
       labels: shown.map((c) => ({
         lat: c.lat, lng: c.lng, alt: 0.006, text: c.name,
-        size: base * (c.pop > 5e6 ? 1.25 : c.pop > 1e6 ? 1 : 0.8) * (c.capital ? 1.1 : 1),
+        size: (c.pop > 5e6 ? 15 : c.pop > 1e6 ? 13 : 11.5) + (c.capital ? 1 : 0), px: true,
         color: c.capital ? 'rgba(255,230,170,0.95)' : 'rgba(238,243,246,0.88)', dot: base * 0.22, fixed: true, ref: { layer: 'cities', d: c },
       })),
     };
@@ -52,7 +52,7 @@ export const airportsLayer = {
   },
   channels(as, ctx) {
     const v = ctx.view;
-    const list = as.filter((a) => (a.large || v.altitude < 0.5) && haversineKm(v.lat, v.lng, a.lat, a.lng) < v.radiusKm * 1.05);
+    const list = as.filter((a) => (a.large || v.altitude < 0.5) && Math.abs(a.lat - v.lat) * 111 < v.radiusKm * 1.05 && haversineKm(v.lat, v.lng, a.lat, a.lng) < v.radiusKm * 1.05);
     return { points: list.map((a) => ({ lat: a.lat, lng: a.lng, alt: 0.006, r: a.large ? 0.14 : 0.08, color: '#b7c8d6', tip: tip(`${a.iata} · ${a.name}`, a.city), ref: { layer: 'airports', d: a }, label: a.iata })) };
   },
   describe(a) {

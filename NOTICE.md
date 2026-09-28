@@ -19,6 +19,7 @@ licence (see [`LICENSE`](LICENSE)). As required by section 5 of the AGPL, this f
 | 2026-09 | v1.2: London and Hong Kong cameras, video clips, a density view for 150,000+ mapped licence-plate readers, weekly ALPR refresh. |
 | 2026-09 | v1.3: live ticker, feed and live tour; GDELT news pins; official crime-report layer; camera wall; Apply button and presets; layer counts; flight emergencies; fixes for shared-object removal and stale address-bar layer lists. |
 | 2026-09 | v1.4: Overwatch HUD and area scan, NASA GIBS overlays, power plants (WRI), internet facilities (PeeringDB) and KiwiSDR receivers (`tools/fetch-networks.mjs`), Baltic ships and Finnish cameras (Digitraffic), satellite footprints. |
+| 2026-09 | v1.5: fast marker renderer (instanced columns, sprite pins and names, grid-index picking), decluttering and cluster badges, hover cards, time-sliced updates, shader pre-compilation, quality governor. |
 
 Nothing under `src/`, `server/`, `api/`, `shared/` or other upstream directories has been changed.
 "World Monitor" is the original author's project name; Terra Atlas does not use it as its own brand.

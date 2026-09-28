@@ -11,7 +11,7 @@ import { haversineKm, fmtLat, fmtLng } from './astro.js';
 
 const tip = (t, s = '') => `<div class="tip"><b>${t}</b>${s ? `<span>${s}</span>` : ''}</div>`;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const inView = (v, lat, lng) => haversineKm(v.lat, v.lng, lat, lng) < v.radiusKm;
+const inView = (v, lat, lng) => Math.abs(lat - v.lat) * 111 < v.radiusKm && haversineKm(v.lat, v.lng, lat, lng) < v.radiusKm; // cheap latitude test first
 
 let camTimer = null; let hls = null;
 export function stopCameraMedia() { clearInterval(camTimer); camTimer = null; if (hls) { hls.destroy(); hls = null; } }
@@ -30,9 +30,9 @@ export function camerasLayer(api) {
       const v = ctx.view;
       const near = v.altitude < 1.2 ? d.cams.filter((c) => inView(v, c.lat, c.lng)).slice(0, 1500) : [];
       return {
-        particles: [{ color: '#7ed6c4', size: 1.4, pts: d.cams.map((c) => ({ lat: c.lat, lng: c.lng, alt: 0.001 })) }],
+        particles: (d._particles ??= [{ color: '#7ed6c4', size: 1.4, pts: d.cams.map((c) => ({ lat: c.lat, lng: c.lng, alt: 0.001 })) }]), // memoised: a new particle set would force a shader rebuild
         points: near.map((c) => ({ lat: c.lat, lng: c.lng, alt: 0.004, r: 0.06, color: '#7ed6c4', tip: tip(esc(c.name), `${esc(c.source)} · click for the live view`), ref: { layer: 'cameras', d: c }, label: c.name })),
-        pick: d.cams.map((c) => ({ lat: c.lat, lng: c.lng, alt: 0.001, ref: { layer: 'cameras', d: c } })),
+        pick: (d._pick ??= d.cams.map((c) => ({ lat: c.lat, lng: c.lng, alt: 0.001, ref: { layer: 'cameras', d: c } }))),
       };
     },
     describeLayer: (d) => ({ rows: [['Cameras', d.cams.length.toLocaleString()], ['Collected', new Date(d.at).toUTCString()], ...d.src.map((s) => [s.name, `${s.count.toLocaleString()} cameras`])] }),
@@ -128,9 +128,9 @@ export function alprLayer(api) {
       }
       const near = v.altitude < 0.9 ? d.rows.filter((r) => inView(v, r[1], r[2])).slice(0, 1200) : [];
       return {
-        particles: [{ color: '#f07a63', size: 1.2, pts: d.rows.map((r) => ({ lat: r[1], lng: r[2], alt: 0.001 })) }],
+        particles: (d._particles ??= [{ color: '#f07a63', size: 1.2, pts: d.rows.map((r) => ({ lat: r[1], lng: r[2], alt: 0.001 })) }]),
         points: near.map((r) => ({ lat: r[1], lng: r[2], alt: 0.003, r: 0.05, color: '#f07a63', tip: tip(esc(r[3] || 'Licence-plate reader'), esc(r[4] || 'mapped in OpenStreetMap')), ref: { layer: 'alpr', d: r }, label: r[3] || 'ALPR' })),
-        pick: d.rows.map((r) => ({ lat: r[1], lng: r[2], alt: 0.001, ref: { layer: 'alpr', d: r } })),
+        pick: (d._pick ??= d.rows.map((r) => ({ lat: r[1], lng: r[2], alt: 0.001, ref: { layer: 'alpr', d: r } }))),
       };
     },
     describeLayer: (d) => ({ rows: [['Mapped readers loaded', d.density ? 'zoom in to load individual readers' : d.rows.length.toLocaleString()], ['Worldwide in snapshot', d.hasIndex ? d.total.toLocaleString() : 'no snapshot yet — zoom in to load live from OpenStreetMap'], ...(d.at ? [['Snapshot date', new Date(d.at).toUTCString()]] : [])] }),
