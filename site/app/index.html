@@ -23,7 +23,7 @@
   <header class="topbar">
     <a class="brand" href="#" id="brand" title="Back to the whole Earth">
       <svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="27" /><path d="M5 32h54M32 5c11 9 11 45 0 54M32 5c-11 9-11 45 0 54" /></svg>
-      <span>Terra Atlas</span>
+      <span>Terra Atlas</span><small class="ver">v1.3</small>
     </a>
     <form class="search" id="search" role="search">
       <label class="sr" for="q">Search places and layers</label>
@@ -31,6 +31,7 @@
       <ul id="results" class="results" role="listbox" hidden></ul>
     </form>
     <nav class="modes" aria-label="Modes">
+      <button id="live-open" class="liveb"><i class="live-dot"></i><span id="live-count">Live</span></button>
       <button data-mode="tours" aria-pressed="false">Tours</button>
       <button data-mode="quiz" aria-pressed="false">Quiz</button>
       <button data-mode="measure" aria-pressed="false">Measure</button>
@@ -43,7 +44,10 @@
   <aside class="panel layers" id="layers" aria-label="Layers">
     <div class="panel-head"><h2>Layers</h2><button class="icon" data-close="layers" aria-label="Close layers">×</button></div>
     <div id="layer-list"></div>
+    <div class="apply-bar" id="apply-bar" hidden><span id="apply-count"></span><button class="btn ghost" id="apply-undo">Undo</button><button class="btn" id="apply-now">Apply</button></div>
   </aside>
+  <div class="ticker" aria-label="Live events"><span class="tk-label"><i class="live-dot"></i>Live</span><div class="tk-view"><div class="tk-track" id="ticker-track"></div></div></div>
+  <div class="toast" id="toast" role="status" hidden></div>
 
   <aside class="panel notes" id="notes" aria-live="polite" aria-label="Field notes">
     <div class="panel-head"><h2 id="notes-title">Field notes</h2><button class="icon" data-close="notes" aria-label="Close field notes">×</button></div>

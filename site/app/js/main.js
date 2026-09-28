@@ -14,6 +14,13 @@ import { flightsLayer, flightState, layoutPlanes, deckAction } from './flights.j
 import { camerasLayer, alprLayer, stopCameraMedia, alprRow } from './cameras.js';
 import { citiesLayer, airportsLayer } from './places.js';
 import { installNavigation } from './nav.js';
+import { newsLayer } from './news.js';
+import { crimeLayer } from './crime.js';
+import { installLive } from './live.js';
+import { openWall } from './cameras.js';
+export const VERSION = '1.3';
+const NEW_VERSION = (() => { try { return localStorage.getItem('terra-atlas-version') !== VERSION; } catch { return false; } })();
+
 import { ICONS } from './icons.js';
 import { orbitOf } from './layers.js';
 import { passes } from './satellites.js';
@@ -112,6 +119,11 @@ function applyZoomScale(force = false) {
     .ringMaxRadius((d) => d.maxR * zk())
     .labelSize((d) => d.size * (d.fixed ? 1 : Math.max(zk(), 0.35)));
 }
+function dominant(points, a) {
+  const n = {}; for (const p of points) n[p.color] = (n[p.color] ?? 0) + 1;
+  const c = Object.entries(n).sort((x, y) => y[1] - x[1])[0]?.[0] ?? '#f07a63'; const [r, g, b] = hex2rgb(c);
+  return `rgba(${r},${g},${b},${a})`;
+}
 const hex2rgb = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
 const val = (v, d) => (typeof v === 'function' ? v(d) : v);
 
@@ -152,6 +164,10 @@ globe
   .particlesColor('color').particlesSize('size').particlesSizeAttenuation(false)
   // html (pins)
   .htmlLat('lat').htmlLng('lng').htmlAltitude((d) => d.alt ?? 0).htmlElement('el').htmlTransitionDuration(0)
+  // hexagon columns (crime density)
+  .hexBinPointLat('lat').hexBinPointLng('lng').hexBinPointWeight('w').hexBinMerge(true).hexTransitionDuration(0).hexMargin(0.12)
+  .hexAltitude(({ sumWeight }) => Math.min(0.25, state.pov.altitude * 0.03 * Math.sqrt(sumWeight)))
+  .hexTopColor(({ points }) => dominant(points, 0.92)).hexSideColor(({ points }) => dominant(points, 0.55))
   // custom three.js objects (merged outlines)
   .customThreeObject((d) => d.obj).customThreeObjectUpdate(() => {})
   // surface clicks + camera
@@ -280,7 +296,7 @@ function countryAt(lat, lng) {
 }
 
 function compose() {
-  const acc = { points: [], rings: [], paths: [], arcs: [], polygons: [], labels: [], particles: [], html: [], custom: [], pick: [] };
+  const acc = { points: [], rings: [], paths: [], arcs: [], polygons: [], labels: [], particles: [], html: [], custom: [], pick: [], hexes: [] };
   for (const l of LAYERS) {
     if (!state.on.has(l.id)) continue;
     const ch = state.chan[l.id];
@@ -303,7 +319,7 @@ function compose() {
 compose.last = {};
 
 // Icon pins: when you are close enough, the nearest markers of each layer turn into labelled map pins.
-const pinCache = new WeakMap();
+const pinCache = new WeakMap(); const pinDatum = new WeakMap();
 function makePins(acc) {
   const v = viewOf(state.pov); document.body.classList.toggle('close', v.altitude < 0.025);
   if (v.altitude > 1.1) return;
@@ -323,7 +339,9 @@ function makePins(acc) {
       el.title = plainTip(p.tip);
       pinCache.set(p.ref.d, el);
     }
-    pins.push({ lat: p.lat, lng: p.lng, alt: p.alt ?? 0.005, el });
+    let dt = pinDatum.get(el); if (!dt) { dt = { el }; pinDatum.set(el, dt); } // stable datum → globe.gl keeps the same DOM node
+    dt.lat = p.lat; dt.lng = p.lng; dt.alt = p.alt ?? 0.005;
+    pins.push(dt);
   }
   acc.points = keep; acc.html.push(...pins);
 }
@@ -332,6 +350,7 @@ const SETTERS = {
   points: (d) => globe.pointsData(d), rings: (d) => globe.ringsData(d), paths: (d) => globe.pathsData(d), arcs: (d) => globe.arcsData(d),
   polygons: (d) => globe.polygonsData(d), labels: (d) => globe.labelsData(d), particles: (d) => globe.particlesData(d),
   html: (d) => globe.htmlElementsData(d), custom: (d) => globe.customLayerData(d), pick: () => {},
+  hexes: (d) => globe.hexBinResolution(state.pov.altitude < 0.006 ? 9 : state.pov.altitude < 0.02 ? 8 : state.pov.altitude < 0.07 ? 7 : 6).hexBinPointsData(d),
 };
 
 // Periodic refresh — each layer declares its own cadence.
@@ -342,25 +361,72 @@ setInterval(() => {
 }, 1000);
 
 // ------------------------------------------------------------------ layer panel
+function countOf(id) {
+  const l = layerById[id]; const ch = state.chan[id]; const d = state.data[id];
+  if (!ch || !d) return '';
+  if (l.count) return l.count(d);
+  const n = ch.pick?.length || (ch.points?.length ?? 0) + (ch.labels?.length ?? 0) + (ch.paths?.length ?? 0) + (ch.polygons?.length ?? 0) + (ch.arcs?.length ?? 0) + (ch.particles ?? []).reduce((s2, g) => s2 + g.pts.length, 0);
+  return n ? n.toLocaleString() : '';
+}
+function updateCount(id) { const el = document.querySelector(`[data-count="${id}"]`); if (el) el.textContent = state.on.has(id) ? countOf(id) : ''; }
 function setLStatus(id, s, note = '') {
   state.lstatus[id] = { s, note };
+  if (s !== 'loading') setTimeout(() => updateCount(id), 0);
   const dot = document.querySelector(`[data-status="${id}"]`);
   if (dot) { dot.dataset.s = s; dot.title = note || (s === 'ok' ? 'Loaded' : s === 'loading' ? 'Loading…' : ''); }
 }
+const PRESETS = [
+  ['Live world', ['sun', 'borders', 'cities', 'quakes', 'events', 'news', 'aircraft', 'stations']],
+  ['Aviation', ['sun', 'borders', 'cities', 'airports', 'aircraft']],
+  ['Cameras', ['borders', 'cities', 'cameras', 'alpr']],
+  ['Crime & civic', ['borders', 'cities', 'crime', 'cameras']],
+  ['Space', ['sun', 'stations', 'satellites', 'aurora']],
+  ['Earth science', ['quakes', 'plates', 'events', 'grid', 'borders']],
+  ['Infrastructure', ['cables', 'pipelines', 'routes', 'waterways', 'ports', 'datacenters', 'borders']],
+];
+state.pending = new Map();
 function renderLayerPanel() {
-  const html = GROUPS.map((g) => `
+  const presets = `<div class="presets" role="group" aria-label="Quick presets">${PRESETS.map(([n], i) => `<button class="chip" data-preset="${i}">${esc(n)}</button>`).join('')}<button class="chip" data-preset="clear">Clear all</button></div>`;
+  const html = presets + GROUPS.map((g) => `
     <section class="group"><h3>${esc(g.label)}${g.note ? `<small>${esc(g.note)}</small>` : ''}</h3>
       ${LAYERS.filter((l) => l.group === g.id).map((l) => `
         <div class="layer" style="--sw:${l.swatch}">
-          <input type="checkbox" id="ly-${l.id}" data-layer="${l.id}" ${state.on.has(l.id) ? 'checked' : ''}/>
+          <input type="checkbox" id="ly-${l.id}" data-layer="${l.id}" ${(state.pending.has(l.id) ? state.pending.get(l.id) : state.on.has(l.id)) ? 'checked' : ''}/>
           <label class="sw" for="ly-${l.id}" aria-hidden="true"></label>
-          <label for="ly-${l.id}">${esc(l.label)}</label>
+          <label for="ly-${l.id}">${esc(l.label)}${l.fresh ? ' <em class="new">new</em>' : ''}${state.pending.has(l.id) ? ' <em class="pend">' + (state.pending.get(l.id) ? 'will show' : 'will hide') + '</em>' : ''}<span class="cnt" data-count="${l.id}">${state.on.has(l.id) ? countOf(l.id) : ''}</span></label>
           <span class="st" data-status="${l.id}" data-s="${state.lstatus[l.id]?.s ?? ''}"></span>
           <button class="learn" data-learn="${l.id}" aria-label="Learn about ${esc(l.label)}">Learn</button>
           ${(l.options ?? []).map((o) => optionHtml(l, o)).join('')}
         </div>`).join('')}
     </section>`).join('');
   $('#layer-list').innerHTML = html;
+  const n = state.pending.size;
+  $('#apply-bar').hidden = n === 0;
+  $('#apply-count').textContent = `${n} change${n === 1 ? '' : 's'} ready`;
+}
+function applyPending() {
+  if (!state.pending.size) return;
+  const shown = []; const hidden = [];
+  for (const [id, on] of state.pending) { (on ? shown : hidden).push(layerById[id].label); }
+  const changes = [...state.pending]; state.pending.clear();
+  for (const [id, on] of changes) toggleLayer(id, on, { quiet: true });
+  renderLayerPanel(); writeHash();
+  toast([shown.length ? `Showing ${shown.join(', ')}` : '', hidden.length ? `Hidden ${hidden.join(', ')}` : ''].filter(Boolean).join(' · '));
+}
+function stage(id, on) {
+  if (on === state.on.has(id)) state.pending.delete(id); else state.pending.set(id, on);
+  renderLayerPanel();
+}
+function preset(i) {
+  const want = i === 'clear' ? new Set() : new Set(PRESETS[i][1]);
+  state.pending.clear();
+  for (const l of LAYERS) if (want.has(l.id) !== state.on.has(l.id)) state.pending.set(l.id, want.has(l.id));
+  renderLayerPanel(); applyPending();
+}
+function toast(msg, ms = 4200) {
+  if (!msg) return;
+  const t = $('#toast'); t.textContent = msg; t.hidden = false; t.classList.remove('out');
+  clearTimeout(toast.t); toast.t = setTimeout(() => { t.classList.add('out'); setTimeout(() => { t.hidden = true; }, 400); }, ms);
 }
 function optionHtml(l, o) {
   const v = state.opts[l.id][o.id];
@@ -369,11 +435,12 @@ function optionHtml(l, o) {
 }
 $('#layer-list').addEventListener('change', (e) => {
   const id = e.target.dataset.layer;
-  if (id) return toggleLayer(id, e.target.checked);
+  if (id) return stage(id, e.target.checked);
   const [lid, oid] = (e.target.dataset.opt ?? '').split(':');
   if (lid) { state.opts[lid][oid] = e.target.value; delete state.data[lid]; refreshLayer(lid); }
 });
 $('#layer-list').addEventListener('click', (e) => {
+  const pr = e.target.closest('[data-preset]'); if (pr) return preset(pr.dataset.preset === 'clear' ? 'clear' : Number(pr.dataset.preset));
   const learn = e.target.closest('[data-learn]');
   if (learn) return showLearn(learn.dataset.learn);
   const chip = e.target.closest('.chip[data-opt]');
@@ -385,8 +452,9 @@ $('#layer-list').addEventListener('click', (e) => {
     refreshLayer(lid);
   }
 });
-function toggleLayer(id, on) {
-  if (on) state.on.add(id); else state.on.delete(id);
+function toggleLayer(id, on, { quiet = false } = {}) {
+  state.pending.delete(id);
+  if (on) state.on.add(id); else { state.on.delete(id); updateCount(id); }
   updateShade();
   const cb = document.getElementById(`ly-${id}`); if (cb) cb.checked = on;
   if (on) refreshLayer(id); else compose();
@@ -419,7 +487,7 @@ function select(ref) {
   openNotes(l.label, `
     <div id="sel-wiki"></div>
     <h3>${esc(c.title)}</h3>${c.sub ? `<p class="sub">${esc(c.sub)}</p>` : ''}
-    ${rowsHtml(c.rows)}${c.body ? `<p>${esc(c.body)}</p>` : ''}
+    ${c.html ?? ''}${rowsHtml(c.rows)}${c.body ? `<p>${esc(c.body)}</p>` : ''}
     ${c.actions?.length ? `<div class="row">${c.actions.map(([a, t]) => `<button class="btn ghost" data-action="${a}">${esc(t)}</button>`).join('')}</div><div id="sel-action"></div>` : ''}
     ${linksHtml(c.links)}
     ${c.probe ? `<h4>Here, right now</h4>${probeHtml(c.probe[0], c.probe[1])}` : ''}
@@ -452,6 +520,8 @@ async function runAction(kind) {
     if (state.home) return go(...state.home);
     navigator.geolocation?.getCurrentPosition((p) => { state.home = [p.coords.latitude, p.coords.longitude]; go(...state.home); }, () => go(state.pov.lat, state.pov.lng));
   }
+  if (kind === 'crime-goto' && ref?.d?.goto) globe.pointOfView({ lat: ref.d.goto.lat, lng: ref.d.goto.lng, altitude: 0.03 }, reduceMotion ? 0 : 1800);
+  if (kind === 'zoom-alpr' && ref?.d) globe.pointOfView({ lat: ref.d.lat, lng: ref.d.lng, altitude: 0.25 }, reduceMotion ? 0 : 1500);
   if (kind === 'near-flights' && ref?.d) { state.opts.aircraft.scope = 'near'; delete state.data.aircraft; toggleLayer('aircraft', true); renderLayerPanel(); globe.pointOfView({ lat: ref.d.lat, lng: ref.d.lng, altitude: 0.08 }, reduceMotion ? 0 : 1500); }
 }
 function showLearn(id) {
@@ -466,6 +536,7 @@ function showLearn(id) {
     <h4>Try this</h4><p>${esc(l.learn.try)}</p>
     ${state.on.has(id) ? '' : `<p><button class="btn" data-enable="${id}">Show this layer</button></p>`}
     ${id === 'alpr' ? '<p><button class="btn ghost" data-alpr-live="1">Load the latest for this area from OpenStreetMap</button></p>' : ''}
+    ${id === 'cameras' ? '<p><button class="btn" data-wall="1">Open the camera wall for this view</button></p>' : ''}
     <h4>Sources and further reading</h4>${refsHtml(l.learn.refs)}`);
 }
 $('#notes-body').addEventListener('click', (e) => {
@@ -899,7 +970,7 @@ function readHash() {
   const m = h.match(/@(-?[\d.]+),(-?[\d.]+),([\d.]+)/);
   if (m) state.pov = { lat: +m[1], lng: +m[2], altitude: +m[3] }; else state.pov = { lat: 18, lng: Math.round(-new Date().getTimezoneOffset() / 4), altitude: 2.4 };
   const b = h.match(/[&]b=([a-z]+)/); if (b && (TILE[b[1]] || TEX[b[1]])) state.base = b[1];
-  const l = h.match(/[&]l=([\w,]*)/); if (l) state.on = new Set(l[1].split(',').filter((x) => layerById[x]));
+  const l = h.match(/[&]l=([\w,]*)/); if (l && !NEW_VERSION) state.on = new Set(l[1].split(',').filter((x) => layerById[x]));
 }
 function writeHash() {
   const p = state.pov;
@@ -946,21 +1017,26 @@ $('#gibs-date-input').value = gibsDate();
 $('#gibs-date-input').addEventListener('change', (e) => { state.gibsDate = e.target.value || null; applyBase(); });
 
 // ------------------------------------------------------------------ plug-in layers (flights, cameras, places)
-const api = { globe, state, esc, openNotes, isOpen, refreshLayer, fly, followTo, setBase, wmo: (c) => WMO[c] ?? '—', select };
+const api = { globe, state, esc, $, reduceMotion, openNotes, isOpen, refreshLayer, fly, followTo, setBase, wmo: (c) => WMO[c] ?? '—', select, toast: (m) => toast(m), toggleLayer: (id, on) => toggleLayer(id, on), openWall: () => openWall(api) };
 {
   const add = (layer, afterId) => { const i = LAYERS.findIndex((l) => l.id === afterId); LAYERS.splice(i + 1, 0, layer); layerById[layer.id] = layer; };
   add(flightsLayer(api), 'events');
   add(camerasLayer(api), 'aurora'); add(alprLayer(api), 'cameras');
   add(citiesLayer, 'grid'); add(airportsLayer, 'cities');
+  add(newsLayer, 'aircraft'); add(crimeLayer, 'alpr');
+  crimeLayer.group = 'civic';
+  for (const id of ['aircraft', 'news', 'cameras', 'alpr', 'crime', 'cities', 'airports']) layerById[id].fresh = true;
+  layerById.aircraft.on = true; layerById.cameras.on = true;
   GROUPS.splice(1, 0, { id: 'cams', label: 'Cameras' });
   GROUPS.splice(3, 0, { id: 'places', label: 'Places' });
-  for (const l of [layerById.aircraft, layerById.cameras, layerById.alpr, layerById.cities, layerById.airports]) {
+  GROUPS.splice(2, 0, { id: 'civic', label: 'Civic data' });
+  for (const l of [layerById.aircraft, layerById.cameras, layerById.alpr, layerById.cities, layerById.airports, layerById.news, layerById.crime]) {
     state.opts[l.id] = Object.fromEntries((l.options ?? []).map((o) => [o.id, structuredClone(o.value)]));
-    if (l.on && !location.hash.includes('&l=')) state.on.add(l.id);
+    if (l.on && (NEW_VERSION || !location.hash.includes('&l='))) state.on.add(l.id);
   }
   // hash may list layers that only exist now
   const hl = decodeURIComponent(location.hash).match(/[&]l=([\w,]*)/);
-  if (hl) for (const id of hl[1].split(',')) if (layerById[id]) state.on.add(id);
+  if (hl && !NEW_VERSION) for (const id of hl[1].split(',')) if (layerById[id]) state.on.add(id);
 }
 
 // ------------------------------------------------------------------ boot
@@ -975,7 +1051,33 @@ globe.pointOfView(state.pov, 0);
 setBase(state.base);
 renderLayerPanel();
 for (const id of state.on) refreshLayer(id);
-if (!location.hash.includes('@') && !isMobile) welcome();
+$('#apply-now').addEventListener('click', applyPending);
+$('#apply-undo').addEventListener('click', () => { state.pending.clear(); renderLayerPanel(); });
+const live = installLive(api);
+if (NEW_VERSION) { setTimeout(whatsNew, 600); try { localStorage.setItem('terra-atlas-version', VERSION); } catch { /* private mode */ } }
+else if (!location.hash.includes('@') && !isMobile) welcome();
+function whatsNew() {
+  openNotes(`What’s new in v${VERSION}`, `<h3>The planet, live</h3>
+    <p class="sub">Look for the <em class="new">new</em> tags in Layers, the red Live ticker at the top, and these one-click starts:</p>
+    <div class="starts">
+      <button class="tour-card" data-start="flights"><b>✈ Every flight in the sky</b><span>Live plane pointers on their real headings. Click one for the seatback flight view.</span></button>
+      <button class="tour-card" data-start="cams"><b>📹 Live cameras, Los Angeles</b><span>Thousands of traffic cameras worldwide, with a camera wall.</span></button>
+      <button class="tour-card" data-start="news"><b>✦ News pins</b><span>Places in the news in the last 24 hours, with headlines.</span></button>
+      <button class="tour-card" data-start="crime"><b>▣ Crime map, Chicago</b><span>Official incident reports as 3D hexagon columns and pins.</span></button>
+      <button class="tour-card" data-start="live"><b>● Live tour</b><span>Sit back while the globe flies from event to event.</span></button>
+    </div>
+    <h4>Also new</h4><p>An <b>Apply</b> button for layer changes, quick presets, live counts next to every layer, flight emergency alerts, licence-plate readers, city names, airports, and navigation that slows down as you zoom in.</p>`, 'whatsnew');
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-start]'); if (!b) return;
+  const k = b.dataset.start;
+  const setLayers = (ids) => { state.pending.clear(); for (const l of LAYERS) if (ids.includes(l.id) !== state.on.has(l.id)) state.pending.set(l.id, ids.includes(l.id)); applyPending(); };
+  if (k === 'flights') { setLayers(['sun', 'borders', 'cities', 'aircraft', 'airports']); globe.pointOfView({ lat: 38, lng: -95, altitude: 1.3 }, 1800); showLearn('aircraft'); }
+  if (k === 'cams') { setLayers(['borders', 'cities', 'cameras', 'alpr']); globe.pointOfView({ lat: 34.05, lng: -118.25, altitude: 0.05 }, 2000); showLearn('cameras'); setTimeout(() => api.openWall(), 3500); }
+  if (k === 'news') { setLayers(['sun', 'borders', 'cities', 'news']); globe.pointOfView({ lat: 25, lng: 20, altitude: 2.3 }, 1800); showLearn('news'); }
+  if (k === 'crime') { setLayers(['borders', 'cities', 'crime']); globe.pointOfView({ lat: 41.88, lng: -87.66, altitude: 0.03 }, 2000); setTimeout(() => showLearn('crime'), 2600); }
+  if (k === 'live') { setLayers(['sun', 'borders', 'cities', 'quakes', 'events', 'news', 'aircraft']); setTimeout(() => document.querySelector('[data-livetour]')?.click() ?? live.openFeed(), 300); live.openFeed(); }
+});
 function welcome() {
   openNotes('Welcome', `<h3>A living Earth to explore</h3>
     <p>Drag to spin the globe and scroll or pinch to zoom — all the way down to streets, using satellite tiles once you get close. Click anything to open its field notes; click empty ground for the weather and the nearest plate boundary; click a country for its fact card.</p>
@@ -995,4 +1097,4 @@ if (window.__TAURI_INTERNALS__) {
     if (a && new URL(a.href).origin !== location.origin) { e.preventDefault(); window.__TAURI_INTERNALS__.invoke('plugin:opener|open_url', { url: a.href }); }
   });
 }
-window.terraAtlas = { globe, state, setBase, toggleLayer, startTour, setMode, select, showLearn, surfaceClick, countryAt, setLook, refreshLayer, flightState }; // for tinkering in the console
+window.terraAtlas = { live, applyPending, preset, VERSION, globe, state, setBase, toggleLayer, startTour, setMode, select, showLearn, surfaceClick, countryAt, setLook, refreshLayer, flightState }; // for tinkering in the console

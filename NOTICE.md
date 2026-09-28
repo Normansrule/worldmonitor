@@ -16,6 +16,8 @@ licence (see [`LICENSE`](LICENSE)). As required by section 5 of the AGPL, this f
 | 2026-09 | Replaced `README.md` with the Terra Atlas README; the original is kept as `README.worldmonitor.md`. |
 
 | 2026-09 | v1.1: live flights with a seatback flight view, public traffic cameras and OpenStreetMap-mapped licence-plate readers (`tools/fetch-cameras.mjs`, `tools/fetch-alpr.mjs`, `.github/workflows/data.yml`), clickable satellites, city and airport layers, map-style pins and navigation, and faster loading. |
+| 2026-09 | v1.2: London and Hong Kong cameras, video clips, a density view for 150,000+ mapped licence-plate readers, weekly ALPR refresh. |
+| 2026-09 | v1.3: live ticker, feed and live tour; GDELT news pins; official crime-report layer; camera wall; Apply button and presets; layer counts; flight emergencies; fixes for shared-object removal and stale address-bar layer lists. |
 
 Nothing under `src/`, `server/`, `api/`, `shared/` or other upstream directories has been changed.
 "World Monitor" is the original author's project name; Terra Atlas does not use it as its own brand.

@@ -129,3 +129,6 @@ footer.site li { margin: 4px 0; }
   footer.site .wrap { grid-template-columns: 1fr; }
   .stats div { border-right: 0; border-bottom: 1px solid var(--rule); }
 }
+.ribbon { display: inline-flex; gap: 10px; align-items: center; margin-bottom: 22px; padding: 7px 14px 7px 7px; border: 1px solid var(--rule); border-radius: 999px; background: rgba(12,33,54,.7); color: var(--paper); text-decoration: none; font-size: 15px; }
+.ribbon b { background: var(--seaglass); color: var(--abyss); border-radius: 999px; padding: 3px 10px; font-size: 13px; }
+.ribbon:hover { border-color: var(--seaglass); color: var(--paper); }

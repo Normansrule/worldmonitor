@@ -7,7 +7,14 @@ import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 
 const OUT = 'site/app/data/cameras.json';
 const UA = { 'User-Agent': 'TerraAtlas/1.1 (+https://github.com/koala73/worldmonitor fork; educational map)' };
-const get = async (url) => { const r = await fetch(url, { headers: UA, signal: AbortSignal.timeout(60_000) }); if (!r.ok) throw new Error(`${url} → HTTP ${r.status}`); return r.json(); };
+const UA_JSON = { ...UA, Accept: 'application/json' };
+const get = async (url, type = 'json') => {
+  const r = await fetch(url, { headers: UA_JSON, signal: AbortSignal.timeout(60_000) });
+  const body = await r.text();
+  if (!r.ok) throw new Error(`${url} → HTTP ${r.status}: ${body.slice(0, 160)}`);
+  if (type === 'text') return body;
+  try { return JSON.parse(body); } catch { throw new Error(`${url} → not JSON: ${body.slice(0, 160)}`); }
+};
 const round = (x) => Math.round(x * 1e5) / 1e5;
 const ok = (lat, lng) => Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !(lat === 0 && lng === 0);
 
@@ -46,11 +53,33 @@ async function five11(base, si, prefix) {
   return out;
 }
 
+// Transport for London JamCams — ~900 cameras, each with a still and a short live video clip.
+async function tfl() {
+  const j = await get('https://api.tfl.gov.uk/Place/Type/JamCam');
+  return j.filter((c) => ok(c.lat, c.lon)).map((c) => {
+    const prop = Object.fromEntries((c.additionalProperties ?? []).map((p) => [p.key, p.value]));
+    if (prop.available === 'false' || !prop.imageUrl) return null;
+    return [`tfl-${c.id}`, c.commonName, round(c.lat), round(c.lon), prop.imageUrl, prop.videoUrl ?? '', 4, 'London'];
+  }).filter(Boolean);
+}
+// Hong Kong Transport Department traffic snapshots (XML list).
+async function hongKong() {
+  const xml = await get('https://static.data.gov.hk/td/traffic-snapshot-images/code/Traffic_Camera_Locations_En.xml', 'text');
+  const tag = (block, t) => (block.match(new RegExp(`<${t}>([\\s\\S]*?)</${t}>`)) ?? [])[1]?.trim().replace(/&amp;/g, '&').replace(/&apos;/g, "'");
+  return [...xml.matchAll(/<image>([\s\S]*?)<\/image>/g)].map(([, b]) => {
+    const lat = Number(tag(b, 'latitude')); const lng = Number(tag(b, 'longitude')); const url = tag(b, 'url');
+    if (!ok(lat, lng) || !url) return null;
+    return [`hk-${tag(b, 'key')}`, tag(b, 'description') ?? 'Camera', round(lat), round(lng), url, '', 5, [tag(b, 'district'), tag(b, 'region')].filter(Boolean).join(' · ')];
+  }).filter(Boolean);
+}
+
 const SOURCES = [
   { name: 'Caltrans (California DOT)', run: caltrans },
   { name: 'NYC DOT', run: nyc },
   { name: '511 Ontario', run: () => five11('https://511on.ca', 2, 'on') },
   { name: '511 Alberta', run: () => five11('https://511.alberta.ca', 3, 'ab') },
+  { name: 'Transport for London (JamCams)', run: tfl },
+  { name: 'Hong Kong Transport Department', run: hongKong },
 ];
 const prev = existsSync(OUT) ? JSON.parse(readFileSync(OUT, 'utf8')) : null;
 const cams = []; const sources = [];

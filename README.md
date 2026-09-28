@@ -23,13 +23,27 @@ Built on [World Monitor](https://github.com/koala73/worldmonitor) by Elie Habib.
 
 ---
 
+## 🔴 New in v1.3
+
+| | |
+|---|---|
+| **Live ticker + Live feed** | A red ticker under the search bar streams what is happening now — earthquakes, storms and wildfires, news, and aircraft squawking emergency codes. The **Live** button opens the full feed with filters; **Start live tour** flies from event to event hands-free. |
+| **News pins** | Places in the news in the last 24 hours (GDELT), by topic — top stories, disasters, conflict, protests, science, climate — each with its headlines and links to the original articles. |
+| **Crime maps** | Official incident reports for Chicago, San Francisco, New York City, Los Angeles and all of England, Wales and Northern Ireland, as 3D hexagon density columns plus pins, with dates, categories and a lesson on reading the numbers fairly. |
+| **Camera wall** | Twelve live cameras nearest the centre of your view in one grid, refreshing every 20 s. Plus London JamCams and Hong Kong cameras. |
+| **Apply button and presets** | Tick and untick layers, then press **Apply** — nothing changes until you do. One-click presets: Live world, Aviation, Cameras, Crime & civic, Space, Earth science, Infrastructure. Every layer shows a live count. |
+| **Flight emergencies** | Aircraft squawking 7500 / 7600 / 7700 are drawn large in red with a pulsing ring and pushed to the Live feed. |
+| **Fixes** | Shared objects no longer vanish when layers are toggled (the cause of flights or pins disappearing), and the first visit after an update resets old layer lists saved in the address bar so new layers actually appear. A **What’s new** card and a version badge show which build you are on. |
+
+---
+
 ## ✨ New in v1.1
 
 | | What you get |
 |---|---|
 | ✈️ **Every flight in the sky** | Live aircraft worldwide (OpenSky) or in detail around your view (adsb.lol), drawn as plane pointers turned to their real heading and coloured by altitude — tens of thousands in a single draw call. |
 | 🪟 **Seatback flight view** | Click a plane for an airline-screen style panel: origin → destination with progress, altitude, ground speed, heading, climb rate, outside air temperature, distance and time to go, weather and local time at the destination, and a photo of the actual aircraft. *Follow* keeps the camera on it; *Window view* drops you to satellite imagery beneath it. |
-| 📹 **Live traffic cameras** | Public road cameras from Caltrans (all 12 California districts), NYC DOT, 511 Ontario and 511 Alberta. Stills refresh every 15 s; Caltrans cameras with a stream play live video. Every camera shows the nearest others as a camera wall. |
+| 📹 **Live traffic cameras** | About 6,000 public road cameras: Caltrans (all 12 California districts), NYC DOT, Transport for London JamCams and Hong Kong’s Transport Department (511 Ontario and Alberta when their feeds respond). Stills refresh every 15 s; Caltrans streams play live and London cameras play a recent video clip. Every camera shows the nearest others as a camera wall. |
 | 🚨 **Licence-plate readers** | Flock Safety and other ALPR cameras mapped in OpenStreetMap (largely via DeFlock), with maker, operator and facing direction, a neutral Learn card on the privacy debate, and a live refresh from OpenStreetMap for the area you are viewing. |
 | 🛰 **Clickable satellites and the ISS** | Click any satellite for its orbit class, perigee and apogee, inclination and period, draw its full orbit, and get the next times it passes over you. |
 | 📍 **Map-style pins and names** | 2,500 city names and 3,300 airports appear as you zoom, like a web map. Close up, markers turn into icon pins with labels. Named places get a Wikipedia summary and photo. |
@@ -119,9 +133,11 @@ flowchart LR
 | | Natural events + storm tracks | NASA EONET | 30 min |
 | | Aurora forecast | NOAA SWPC OVATION | 15 min |
 | | Live flights (worldwide or near view) + seatback flight view | OpenSky · adsb.lol · airplanes.live · adsbdb | 12 s – 60 s |
-| Cameras | Live traffic cameras (stills + live video) | Caltrans · NYC DOT · 511 Ontario · 511 Alberta | list daily, images live |
-| | Licence-plate readers (Flock and others) | OpenStreetMap / DeFlock · Overpass | daily + on demand |
+| Cameras | Live traffic cameras (stills, live video, clips) | Caltrans · NYC DOT · TfL · Hong Kong TD · 511 Ontario/Alberta | list daily, images live |
+| | Licence-plate readers (Flock and others) — 150,000+ mapped; density grid when zoomed out | OpenStreetMap / DeFlock · Overpass | weekly + on demand |
 | Places | City names (zoom-dependent) · Airports | Natural Earth · OurAirports | static |
+| Live Earth | News pins by topic | GDELT GEO 2.0 | 15 min |
+| Civic data | Reported crime (hexagon density + pins) | Chicago · DataSF · NYC Open Data · LA City · data.police.uk | on view |
 | Sky and space | Day and night (terminator, subsolar point) | computed | 1 min |
 | | Space stations + ISS ground track | CelesTrak + SGP4 | 2 s |
 | | Satellite shells (brightest, weather, GPS, geostationary, Starlink) | CelesTrak + SGP4 | 3 s |
@@ -138,7 +154,7 @@ flowchart LR
 <table><tr>
 <td width="55%">
 
-**Eleven lessons** on the [Learn page](https://normansrule.github.io/worldmonitor/learn/), each with the key equation, its sources and a button that opens the idea on the globe:
+**Twelve lessons** on the [Learn page](https://normansrule.github.io/worldmonitor/learn/), each with the key equation, its sources and a button that opens the idea on the globe:
 
 1. Plate tectonics and earthquakes — `E₂/E₁ = 10^(1.5·ΔM)`
 2. Orbits — Kepler’s third law, `T = 2π√(a³/μ)`
@@ -151,6 +167,7 @@ flowchart LR
 9. Fluids — Navier–Stokes, stable fluids, Coriolis
 10. How flight tracking works — ADS-B and the standard atmosphere
 11. Cameras, maps and privacy
+12. Reading crime data responsibly
 
 </td>
 <td>
@@ -299,7 +316,7 @@ tools/                      data export, camera + ALPR fetchers, setup, screensh
 | [hls.js](https://github.com/video-dev/hls.js) · Apache-2.0 | Live camera video |
 | [Tauri](https://github.com/tauri-apps/tauri) · MIT/Apache-2.0 | Desktop app |
 
-Data: Caltrans · NYC DOT · 511 Ontario · 511 Alberta · © OpenStreetMap contributors via DeFlock and Overpass · OpenSky Network · airplanes.live · adsbdb (routes looked up live, not stored) · OurAirports · Natural Earth · Panoramax (CC BY-SA) · USGS · NASA EONET · NASA GIBS (*we acknowledge the use of imagery provided by services from NASA’s Global Imagery Browse Services (GIBS), part of NASA’s Earth Science Data and Information System (ESDIS)*) · NOAA SWPC · CelesTrak · adsb.lol (ODbL) · OpenSky Network · Open-Meteo (CC BY 4.0) · REST Countries · World Bank (CC BY 4.0) · Wikipedia (CC BY-SA) · © OpenStreetMap contributors (ODbL) · Esri World Imagery · PB2002 plate boundaries (ODC-BY) · NASA Blue Marble and Black Marble. Full list with licences: [`docs/REFERENCES.md`](docs/REFERENCES.md).
+Data: GDELT Project · City of Chicago · DataSF · NYC Open Data · City of Los Angeles · data.police.uk (OGL v3) · Caltrans · NYC DOT · Transport for London (OGL) · Hong Kong Transport Department · 511 Ontario · 511 Alberta · © OpenStreetMap contributors via DeFlock and Overpass · OpenSky Network · airplanes.live · adsbdb (routes looked up live, not stored) · OurAirports · Natural Earth · Panoramax (CC BY-SA) · USGS · NASA EONET · NASA GIBS (*we acknowledge the use of imagery provided by services from NASA’s Global Imagery Browse Services (GIBS), part of NASA’s Earth Science Data and Information System (ESDIS)*) · NOAA SWPC · CelesTrak · adsb.lol (ODbL) · OpenSky Network · Open-Meteo (CC BY 4.0) · REST Countries · World Bank (CC BY 4.0) · Wikipedia (CC BY-SA) · © OpenStreetMap contributors (ODbL) · Esri World Imagery · PB2002 plate boundaries (ODC-BY) · NASA Blue Marble and Black Marble. Full list with licences: [`docs/REFERENCES.md`](docs/REFERENCES.md).
 
 ## 📄 License
 

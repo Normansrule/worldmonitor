@@ -20,7 +20,7 @@ export function stopCameraMedia() { clearInterval(camTimer); camTimer = null; if
 export function camerasLayer(api) {
   return {
     id: 'cameras', group: 'cams', label: 'Live traffic cameras', swatch: '#7ed6c4', on: false, viewDependent: true, pin: 'camera',
-    sources: ['caltrans', 'nycdot', 'on511', 'ab511'],
+    sources: ['caltrans', 'nycdot', 'tfl', 'hktd', 'on511', 'ab511'],
     async load() {
       const d = await getLocal('data/cameras.json').catch(() => { throw new Error('the camera list has not been collected yet — run the “Refresh camera data” workflow once (see the README)'); });
       const src = d.sources.map((s) => s.name);
@@ -38,10 +38,10 @@ export function camerasLayer(api) {
     describeLayer: (d) => ({ rows: [['Cameras', d.cams.length.toLocaleString()], ['Collected', new Date(d.at).toUTCString()], ...d.src.map((s) => [s.name, `${s.count.toLocaleString()} cameras`])] }),
     open: (c) => openCamera(c, api),
     learn: {
-      what: 'Public road cameras published by transport agencies. Zoom in to see individual camera pins; click one to watch it. Most show a still image that refreshes every few seconds; many Caltrans cameras also stream live video.',
+      what: 'Public road cameras published by transport agencies in California, New York City, London and Hong Kong (plus Ontario and Alberta when their feeds respond). Zoom in to see camera pins; click one to watch it. Most show a still image that refreshes every 15 seconds; many Caltrans cameras stream live video and London’s JamCams play a short recent clip.',
       how: 'Agencies publish open lists of their cameras with a snapshot address. A GitHub Action collects the lists every day into one file for this site; the pictures themselves always come straight from the agency when you open a camera, so they are as fresh as the agency makes them.',
       try: 'Open a freeway camera at rush hour, then switch on Live flights near the same city and watch the approach path overhead.',
-      refs: ['caltrans', 'nycdot', 'on511', 'ab511'],
+      refs: ['caltrans', 'nycdot', 'tfl', 'hktd', 'on511', 'ab511'],
     },
   };
 }
@@ -69,9 +69,10 @@ async function openCamera(c, api) {
 
 async function playStream(url) {
   const video = document.getElementById('cam-video'); const img = document.getElementById('cam-img'); const status = document.getElementById('cam-status');
-  const ok = () => { video.hidden = false; img.hidden = true; status.textContent = 'Live video'; };
+  const ok = () => { video.hidden = false; img.hidden = true; status.textContent = /\.mp4($|\?)/.test(url) ? 'Latest video clip (loops) — updated every few minutes by the agency' : 'Live video'; };
   const fail = () => { video?.remove(); status.textContent = 'Live video unavailable here — showing the latest still (refreshes every 15 s)'; };
   try {
+    if (/\.mp4($|\?)/.test(url)) { video.loop = true; video.src = url; video.onloadeddata = ok; video.onerror = fail; return; }
     if (video.canPlayType('application/vnd.apple.mpegurl')) { video.src = url; video.onloadeddata = ok; video.onerror = fail; return; }
     if (!window.Hls) await new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'vendor/hls.light.min.js'; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
     if (!window.Hls?.isSupported()) return fail();
@@ -85,7 +86,7 @@ async function playStream(url) {
 // --------------------------------------------------------------- licence-plate readers (ALPR)
 const cellKey = (lat, lng) => `${Math.floor(lat / 10) * 10}_${Math.floor(lng / 10) * 10}`;
 export function alprLayer(api) {
-  let index = null; const cells = new Map(); const live = new Map();
+  let index = null; let density = null; const cells = new Map(); const live = new Map();
   return {
     id: 'alpr', group: 'cams', label: 'Licence-plate readers', swatch: '#f07a63', on: false, viewDependent: true, reloadOnView: true, pin: 'alpr',
     sources: ['osm', 'deflock', 'overpass'],
@@ -99,8 +100,11 @@ export function alprLayer(api) {
           const k = cellKey(Math.max(-89, Math.min(89, la)), ((((lo + 180) % 360) + 360) % 360) - 180);
           if (index.cells[k]) want.add(k);
         }
-        if (v.altitude > 1.5) Object.keys(index.cells).forEach((k) => want.add(k));
-        await Promise.all([...want].filter((k) => !cells.has(k)).map(async (k) => cells.set(k, (await getLocal(`data/alpr/${k}.json`)).rows)));
+        if (v.altitude > 1.2) { // zoomed out: a 1° density grid instead of 150,000+ individual readers
+          density ??= await getLocal('data/alpr/density.json').then((d) => d.rows).catch(() => []);
+          return { rows: [], density, at: index.generatedAt, total: index.total, hasIndex: true };
+        }
+        await Promise.all([...want].filter((k) => !cells.has(k)).map(async (k) => cells.set(k, (await getLocal(`data/alpr/${k}.json`).catch(() => ({ rows: [] }))).rows)));
       } else if (v.altitude < 0.25) {
         await this.fetchLive(v);
       }
@@ -118,6 +122,10 @@ export function alprLayer(api) {
     },
     channels(d, ctx) {
       const v = ctx.view;
+      if (d.density) {
+        const max = Math.max(...d.density.map((r) => r[2]));
+        return { points: d.density.map(([lat, lng, n]) => ({ lat, lng, alt: 0.004 + 0.12 * Math.log1p(n) / Math.log1p(max), r: 0.35, color: n > 500 ? '#f07a63' : n > 50 ? '#f39a86' : 'rgba(240,122,99,0.55)', tip: tip(`${n.toLocaleString()} mapped readers`, 'in this 1° square — zoom in for each camera'), ref: { layer: 'alpr', d: { density: n, lat, lng } } })) };
+      }
       const near = v.altitude < 0.9 ? d.rows.filter((r) => inView(v, r[1], r[2])).slice(0, 1200) : [];
       return {
         particles: [{ color: '#f07a63', size: 1.2, pts: d.rows.map((r) => ({ lat: r[1], lng: r[2], alt: 0.001 })) }],
@@ -125,8 +133,9 @@ export function alprLayer(api) {
         pick: d.rows.map((r) => ({ lat: r[1], lng: r[2], alt: 0.001, ref: { layer: 'alpr', d: r } })),
       };
     },
-    describeLayer: (d) => ({ rows: [['Mapped readers loaded', d.rows.length.toLocaleString()], ['Worldwide in snapshot', d.hasIndex ? d.total.toLocaleString() : 'no snapshot yet — zoom in to load live from OpenStreetMap'], ...(d.at ? [['Snapshot date', new Date(d.at).toUTCString()]] : [])] }),
+    describeLayer: (d) => ({ rows: [['Mapped readers loaded', d.density ? 'zoom in to load individual readers' : d.rows.length.toLocaleString()], ['Worldwide in snapshot', d.hasIndex ? d.total.toLocaleString() : 'no snapshot yet — zoom in to load live from OpenStreetMap'], ...(d.at ? [['Snapshot date', new Date(d.at).toUTCString()]] : [])] }),
     describe(r) {
+      if (r.density) return { title: `${r.density.toLocaleString()} licence-plate readers`, sub: `mapped in the 1° square around ${fmtLat(r.lat)}, ${fmtLng(r.lng)}`, body: 'Zoom in to load every individual reader in this area with its maker, operator and direction.', actions: [['zoom-alpr', 'Zoom in here']] };
       const [id, lat, lng, brand, operator, dir, mount, extra] = r;
       return {
         title: brand ? `${brand} licence-plate reader` : 'Licence-plate reader', sub: operator ? `Operated by ${operator}` : 'Operator not recorded in OpenStreetMap',
@@ -147,4 +156,25 @@ export function alprLayer(api) {
 export function alprRow(n) {
   const t = n.tags ?? {};
   return [n.id, n.lat, n.lon, t.manufacturer || t.brand || '', t.operator || '', t.direction || t['camera:direction'] || '', t['camera:mount'] || '', t.note || ''];
+}
+
+// --------------------------------------------------------------- camera wall
+let wallTimer = null;
+export function openWall(api) {
+  const cams = api.state.data.cameras?.cams;
+  if (!cams) { api.toggleLayer('cameras', true); return api.toast('Loading cameras — open the wall again in a moment'); }
+  const { lat, lng } = api.state.pov;
+  const near = cams.map((c) => ({ c, km: haversineKm(lat, lng, c.lat, c.lng) })).sort((a, b) => a.km - b.km).slice(0, 12);
+  let el = document.getElementById('wall');
+  if (!el) { el = document.createElement('div'); el.id = 'wall'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Camera wall'); document.body.appendChild(el); }
+  const bust = (u) => `${u}${u.includes('?') ? '&' : '?'}t=${Date.now()}`;
+  el.innerHTML = `<div class="wall-head"><b>Camera wall</b><span>${near.length} cameras nearest the centre of your view · refreshing every 20 s</span><button class="icon" id="wall-close" aria-label="Close camera wall">×</button></div>
+    <div class="wall-grid">${near.map(({ c, km }) => `<button class="wall-tile" data-walltile="${esc(c.id)}"><img src="${esc(bust(c.img))}" alt="" onerror="this.style.visibility='hidden'"/><span><b>${esc(c.name)}</b><small>${esc(c.source)} · ${km < 10 ? km.toFixed(1) : Math.round(km)} km</small></span><i class="live-dot"></i></button>`).join('')}</div>`;
+  el.hidden = false;
+  clearInterval(wallTimer);
+  wallTimer = setInterval(() => el.querySelectorAll('.wall-tile img').forEach((img, k) => { img.src = bust(near[k].c.img); }), 20_000);
+  const close = () => { el.hidden = true; clearInterval(wallTimer); };
+  el.querySelector('#wall-close').onclick = close;
+  el.onclick = (e) => { const t = e.target.closest('[data-walltile]'); if (!t) return; const c = cams.find((x) => x.id === t.dataset.walltile); close(); api.select({ layer: 'cameras', d: c }); };
+  document.addEventListener('keydown', function esc2(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc2); } });
 }

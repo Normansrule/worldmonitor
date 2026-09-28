@@ -20,6 +20,8 @@ Every data source, library and reference used by the Terra Atlas globe app. This
 | [adsbdb (api.adsbdb.com)](https://www.adsbdb.com) | Courtesy API; route data © David Taylor & Jim Mason, not stored | Aircraft type, registration, photo and route for a selected flight (looked up live, never stored). |
 | [Caltrans CWWP2 — CCTV status (all 12 districts)](https://cwwp2.dot.ca.gov/documentation/cctv/cctv.htm) | Public data (State of California) | California highway cameras, stills and live streams. |
 | [NYC DOT traffic cameras (webcams.nyctmc.org)](https://webcams.nyctmc.org) | Public data (City of New York) | New York City traffic cameras. |
+| [Transport for London — JamCams (Unified API)](https://api.tfl.gov.uk) | Powered by TfL Open Data (OGL v2.0) | London traffic cameras with short video clips. |
+| [Hong Kong Transport Department — traffic snapshots](https://data.gov.hk/en-data/dataset/hk-td-tis_2-traffic-snapshot-images) | DATA.GOV.HK terms of use | Hong Kong traffic cameras. |
 | [511 Ontario open data](https://511on.ca/developers/doc) | Open Government Licence – Ontario | Ontario highway cameras. |
 | [511 Alberta open data](https://511.alberta.ca/developers/doc) | Open Government Licence – Alberta | Alberta highway cameras. |
 | [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) | ODbL 1.0 | Mapped licence-plate readers (surveillance:type=ALPR). |
@@ -30,6 +32,12 @@ Every data source, library and reference used by the Terra Atlas globe app. This
 | [OurAirports](https://ourairports.com/data/) | Public domain | Airports layer and search. |
 | [Panoramax](https://panoramax.fr) | CC BY-SA 4.0 (photos) | Open street-level photos in the point probe. |
 | [hls.js](https://github.com/video-dev/hls.js) | Apache-2.0 | Plays live camera video streams. |
+| [The GDELT Project — GEO 2.0 API](https://www.gdeltproject.org) | Free and open; cite GDELT | Places in the news in the last 24 hours, with article links. |
+| [City of Chicago — Crimes 2001 to present (CPD)](https://data.cityofchicago.org/d/ijzp-q8t2) | City of Chicago Data Portal terms | Chicago incident reports. |
+| [DataSF — Police Department Incident Reports 2018 to present](https://data.sfgov.org/d/wg3w-h783) | Open Data Commons PDDL | San Francisco incident reports. |
+| [NYC Open Data — NYPD Complaint Data Current (Year to Date)](https://data.cityofnewyork.us/d/5uac-w243) | NYC Open Data terms | New York City complaint reports. |
+| [City of Los Angeles — Crime Data from 2020 to Present (LAPD)](https://data.lacity.org/d/2nrs-mtv8) | City of LA open data terms | Los Angeles crime reports. |
+| [data.police.uk — street-level crimes API](https://data.police.uk/docs/) | Open Government Licence v3.0 | England, Wales and Northern Ireland street-level crime. |
 | [Open-Meteo forecast & elevation APIs](https://open-meteo.com) | CC BY 4.0 | Weather and ground elevation for any clicked point. |
 | [REST Countries](https://restcountries.com) | MPL-2.0 | Capital, population, languages, currencies for the country card. |
 | [World Bank Open Data API](https://datahelpdesk.worldbank.org/knowledgebase/articles/889392) | CC BY 4.0 | GDP, life expectancy, internet use and renewable share indicators. |

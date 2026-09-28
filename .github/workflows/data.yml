@@ -2,7 +2,8 @@
 name: Refresh camera data
 on:
   schedule:
-    - cron: '17 9 * * *'   # daily, 09:17 UTC
+    - cron: '17 9 * * 1-6'   # cameras daily (Mon–Sat), 09:17 UTC
+    - cron: '17 9 * * 0'     # Sundays: cameras + the full OpenStreetMap ALPR snapshot
   workflow_dispatch:
 permissions:
   contents: write
@@ -17,7 +18,8 @@ jobs:
           node-version: 22
       - name: Traffic cameras
         run: node tools/fetch-cameras.mjs
-      - name: Licence-plate readers (OpenStreetMap)
+      - name: Licence-plate readers (OpenStreetMap) — weekly, or whenever run by hand
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '17 9 * * 0'
         run: node tools/fetch-alpr.mjs
       - name: Commit if anything changed
         run: |

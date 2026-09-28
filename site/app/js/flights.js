@@ -12,7 +12,7 @@ import { haversineKm, greatCirclePoints, fmtLat, fmtLng, localSolarTime } from '
 const R = 100;
 const MAX = 20000;
 const history = new Map(); // icao -> [[lat, lng, altFt, t], ...]
-let mesh = null; let lastList = [];
+let mesh = null; let lastList = []; const WRAP = { obj: null }; // one stable datum, so globe.gl never swaps (and removes) the shared mesh
 let worldCache = null; let worldAt = 0;
 export const flightState = { selected: null, follow: false, route: {} };
 
@@ -81,6 +81,7 @@ function ensureMesh() {
   return mesh;
 }
 const tmp = { m: new THREE.Matrix4(), p: new THREE.Vector3(), n: new THREE.Vector3(), e: new THREE.Vector3(), u: new THREE.Vector3(), d: new THREE.Vector3(), r: new THREE.Vector3(), c: new THREE.Color() };
+export const EMERGENCY = new Set(['7500', '7600', '7700', 7500, 7600, 7700]);
 const altColor = (ft, ground) => (ground ? '#8aa0b3' : ft < 10000 ? '#7ed6c4' : ft < 25000 ? '#ffd37a' : '#f2f5f7');
 const exaggeration = (camAlt) => 1 + Math.min(30, camAlt * 14);
 
@@ -99,10 +100,10 @@ export function layoutPlanes(globe, camAlt, list = lastList) {
     const h = (a.trk ?? 0) * Math.PI / 180;
     tmp.d.copy(tmp.n).multiplyScalar(Math.cos(h)).addScaledVector(tmp.e, Math.sin(h)).normalize();
     tmp.r.crossVectors(tmp.d, tmp.u).normalize();
-    const sel = flightState.selected === a.id; const k = sel ? size * 2.2 : size;
+    const sel = flightState.selected === a.id; const k = sel || EMERGENCY.has(a.squawk) ? size * 2.2 : size;
     tmp.m.makeBasis(tmp.r.multiplyScalar(k), tmp.d.multiplyScalar(k), tmp.u.clone().multiplyScalar(k)).setPosition(tmp.p);
     m.setMatrixAt(i, tmp.m);
-    tmp.c.set(sel ? '#f07a63' : altColor(a.altFt, a.ground)); m.setColorAt(i, tmp.c);
+    tmp.c.set(sel ? '#f07a63' : EMERGENCY.has(a.squawk) ? '#ff3b30' : altColor(a.altFt, a.ground)); m.setColorAt(i, tmp.c);
     a._alt = alt; i += 1;
   }
   m.count = i; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true;
@@ -124,13 +125,16 @@ const isaTempC = (ft) => { const km = ft / 3281; return km <= 11 ? 15 - 6.5 * km
 // --------------------------------------------------------------- the layer
 export function flightsLayer(api) {
   return {
-    id: 'aircraft', group: 'live', label: 'Live flights', swatch: '#f2f5f7', on: false, refresh: 12_000, pinless: true,
+    id: 'aircraft', group: 'live', label: 'Live flights', swatch: '#8ecbff', on: false, refresh: 12_000, pinless: true,
     sources: ['opensky', 'adsblol', 'airplaneslive', 'adsbdb'],
     options: [{ id: 'scope', label: 'Coverage', choices: [['world', 'Whole world'], ['near', 'Near my view (more detail)']], value: 'world' }],
     load: (o, ctx) => loadFlights(o, ctx),
     channels(d, ctx) {
       layoutPlanes(ctx.globe, ctx.pov.altitude, d.ac);
-      const out = { custom: [{ obj: ensureMesh() }], pick: d.ac.map((a) => ({ lat: a.lat, lng: a.lng, alt: a._alt ?? 0, ref: { layer: 'aircraft', d: { ...a, src: d.src } } })) };
+      WRAP.obj = ensureMesh();
+      const out = { custom: [WRAP], pick: d.ac.map((a) => ({ lat: a.lat, lng: a.lng, alt: a._alt ?? 0, ref: { layer: 'aircraft', d: { ...a, src: d.src } } })) };
+      const em = d.ac.filter((a) => EMERGENCY.has(a.squawk));
+      if (em.length) out.rings = em.map((a) => ({ lat: a.lat, lng: a.lng, color: '#ff3b30', maxR: 1.6, speed: 2, period: 900 }));
       const sel = d.ac.find((a) => a.id === flightState.selected);
       if (sel) {
         const h = history.get(sel.id) ?? [];
@@ -145,7 +149,7 @@ export function flightsLayer(api) {
     },
     open: (a) => openDeck(a, api),
     learn: {
-      what: 'Aircraft broadcasting their position right now, drawn as plane pointers turned to their real heading. White is above 25,000 ft, yellow 10,000–25,000 ft, teal below 10,000 ft, grey on the ground. Click a plane for its seatback-style flight view.',
+      what: 'Aircraft broadcasting their position right now. Planes squawking an emergency code (7500, 7600, 7700) are drawn large in red with a pulsing ring and appear in the Live feed. Every plane is a pointer turned to its real heading. White is above 25,000 ft, yellow 10,000–25,000 ft, teal below 10,000 ft, grey on the ground. Click a plane for its seatback-style flight view.',
       how: 'Planes work out where they are with satellite navigation and broadcast it about twice a second on 1090 MHz (ADS-B). Thousands of volunteer receivers share what they hear. “Whole world” reads the OpenSky Network once a minute; “Near my view” reads adsb.lol every few seconds within about 460 km of the centre of the screen. Heights are exaggerated so you can see them.',
       try: 'Pick a long-haul flight over an ocean, open its flight view and choose Follow. Then compare the “outside temperature” with the standard-atmosphere formula in the Learn page.',
       refs: ['opensky', 'adsblol', 'adsbdb'],

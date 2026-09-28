@@ -23,7 +23,11 @@ for (const n of j.elements) {
   const k = `${Math.floor(n.lat / 10) * 10}_${Math.floor(n.lon / 10) * 10}`;
   (cells[k] ??= []).push([n.id, Math.round(n.lat * 1e6) / 1e6, Math.round(n.lon * 1e6) / 1e6, t.manufacturer || t.brand || '', t.operator || '', t.direction || t['camera:direction'] || '', t['camera:mount'] || '', t.note || '']);
 }
+// 1° density grid for zoomed-out views (so the whole world never has to be downloaded at once).
+const density = {};
+for (const n of j.elements) { const k = `${Math.floor(n.lat)}_${Math.floor(n.lon)}`; density[k] = (density[k] ?? 0) + 1; }
 rmSync(DIR, { recursive: true, force: true }); mkdirSync(DIR, { recursive: true });
+writeFileSync(`${DIR}/density.json`, JSON.stringify({ rows: Object.entries(density).map(([k, c]) => { const [a, b] = k.split('_').map(Number); return [a + 0.5, b + 0.5, c]; }) }));
 for (const [k, rows] of Object.entries(cells)) writeFileSync(`${DIR}/${k}.json`, JSON.stringify({ rows }));
 writeFileSync(`${DIR}/index.json`, JSON.stringify({ generatedAt: new Date().toISOString(), total: j.elements.length, cells: Object.fromEntries(Object.entries(cells).map(([k, v]) => [k, v.length])), attribution: '© OpenStreetMap contributors, ODbL 1.0' }));
 console.log(`wrote ${Object.keys(cells).length} cells, ${j.elements.length} readers`);

@@ -20,5 +20,7 @@ export const ICONS = {
   water: S('<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>'),
   sat: S('<rect x="9" y="9" width="6" height="6" transform="rotate(45 12 12)"/><path d="M4 4l3.5 3.5M16.5 16.5L20 20M2 8l6-6M16 22l6-6"/>'),
   city: S('<path d="M3 21V10l5-3v14M8 21V4l7 3v14M15 21v-9l6 2v7M2 21h20"/>'),
+  news: S('<rect x="3" y="5" width="14" height="15" rx="1.5"/><path d="M17 9h4v9a2 2 0 0 1-4 0M6.5 9h7M6.5 12.5h7M6.5 16h4"/>'),
+  badge: S('<path d="M12 2l8 3v6c0 5-3.4 9.3-8 11-4.6-1.7-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/>'),
   pin: S('<path d="M12 22s7-7.2 7-12.5A7 7 0 0 0 5 9.5C5 14.8 12 22 12 22z"/><circle cx="12" cy="9.5" r="2.5"/>'),
 };
