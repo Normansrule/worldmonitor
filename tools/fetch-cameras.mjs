@@ -73,6 +73,17 @@ async function hongKong() {
   }).filter(Boolean);
 }
 
+// Fintraffic weather cameras, Finland (CC BY 4.0) — every station has several fixed views ("presets").
+async function finland() {
+  const j = await get('https://tie.digitraffic.fi/api/weathercam/v1/stations');
+  const out = [];
+  for (const f of j.features ?? []) {
+    const [lng, lat] = f.geometry?.coordinates ?? []; if (!ok(lat, lng)) continue;
+    for (const p of (f.properties.presets ?? []).filter((x) => x.inCollection !== false).slice(0, 2)) out.push([`fi-${p.id}`, f.properties.name ?? p.id, round(lat), round(lng), `https://weathercam.digitraffic.fi/${p.id}.jpg`, '', 6, 'Finland']);
+  }
+  return out;
+}
+
 const SOURCES = [
   { name: 'Caltrans (California DOT)', run: caltrans },
   { name: 'NYC DOT', run: nyc },
@@ -80,6 +91,7 @@ const SOURCES = [
   { name: '511 Alberta', run: () => five11('https://511.alberta.ca', 3, 'ab') },
   { name: 'Transport for London (JamCams)', run: tfl },
   { name: 'Hong Kong Transport Department', run: hongKong },
+  { name: 'Fintraffic weather cameras (Finland)', run: finland },
 ];
 const prev = existsSync(OUT) ? JSON.parse(readFileSync(OUT, 'utf8')) : null;
 const cams = []; const sources = [];

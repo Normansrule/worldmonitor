@@ -22,5 +22,9 @@ export const ICONS = {
   city: S('<path d="M3 21V10l5-3v14M8 21V4l7 3v14M15 21v-9l6 2v7M2 21h20"/>'),
   news: S('<rect x="3" y="5" width="14" height="15" rx="1.5"/><path d="M17 9h4v9a2 2 0 0 1-4 0M6.5 9h7M6.5 12.5h7M6.5 16h4"/>'),
   badge: S('<path d="M12 2l8 3v6c0 5-3.4 9.3-8 11-4.6-1.7-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/>'),
+  bolt: S('<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>', true),
+  server: S('<rect x="4" y="3" width="16" height="7" rx="1.5"/><rect x="4" y="14" width="16" height="7" rx="1.5"/><path d="M8 6.5h.01M8 17.5h.01M12 6.5h5M12 17.5h5"/>'),
+  radio: S('<rect x="3" y="9" width="18" height="12" rx="2"/><circle cx="15.5" cy="15" r="3"/><path d="M6 13h4M6 17h4M7 9l10-6"/>'),
+  ship: S('<path d="M3 16l2 4h14l2-4zM6 16V9h12v7M12 3v6M9 6h6"/>'),
   pin: S('<path d="M12 22s7-7.2 7-12.5A7 7 0 0 0 5 9.5C5 14.8 12 22 12 22z"/><circle cx="12" cy="9.5" r="2.5"/>'),
 };

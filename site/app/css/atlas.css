@@ -286,3 +286,39 @@ em.pend { font-style: normal; font-size: 11px; color: var(--brass); }
 .wall-tile small { color: #cfd8df; font-size: 11.5px; }
 .wall-tile .live-dot { position: absolute; top: 8px; right: 8px; }
 @media (max-width: 860px) { .ticker { left: 8px; right: 8px; top: calc(112px + env(safe-area-inset-top, 0px)); } .notes.open ~ .ticker { right: 8px; } .layers, .notes { top: auto; } }
+
+/* ---------- v1.4: Overwatch HUD + area scan ---------- */
+body[data-look='hud'] #globe canvas { filter: saturate(0.55) hue-rotate(155deg) brightness(1.05) contrast(1.15); }
+body[data-look='hud'] .look-overlay { display: block; background: repeating-linear-gradient(0deg, rgba(126,214,196,.05) 0 1px, transparent 1px 4px), radial-gradient(circle, transparent 55%, rgba(0,20,26,.7) 100%); }
+#hud { position: fixed; inset: 0; z-index: 3; pointer-events: none; color: #9ff8e8; font: 600 13px/1.4 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; letter-spacing: .04em; text-shadow: 0 0 6px rgba(126,214,196,.6); }
+#hud[hidden] { display: none; }
+#hud .reticle { position: absolute; left: 50%; top: 50%; width: 220px; height: 220px; transform: translate(-50%, -50%); fill: none; stroke: #7ef8e2; stroke-width: 1.4; opacity: .85; animation: hudspin 18s linear infinite; }
+#hud .reticle .thin { stroke-dasharray: 3 7; stroke-width: 1; }
+#hud .reticle .dot { fill: #7ef8e2; }
+@keyframes hudspin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+#hud .hud-tl { position: absolute; left: 300px; top: 118px; display: flex; flex-direction: column; gap: 2px; }
+#hud .hud-tl b { font-size: 16px; letter-spacing: .3em; color: #d8fff8; }
+#hud .hud-tr { position: absolute; right: 24px; top: 118px; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+body.hud-on .notes.open ~ #hud .hud-tr, .notes.open ~ #hud .hud-tr { right: 396px; }
+#hud .hud-tr span { color: var(--c); }
+#hud .hud-tr i { font-style: normal; color: #9ff8e8; opacity: .8; }
+#hud .hud-bl { position: absolute; left: 300px; bottom: 150px; display: flex; flex-direction: column; gap: 2px; }
+#hud .hud-scan { pointer-events: auto; position: absolute; left: 50%; top: calc(50% + 130px); transform: translateX(-50%); background: rgba(0,30,34,.7); border: 1px solid #7ef8e2; color: #d8fff8; font: inherit; letter-spacing: .2em; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+#hud .hud-scan:hover { background: rgba(126,248,226,.2); }
+#hud .hud-sweep { position: absolute; left: 50%; top: 50%; width: 0; height: 0; border-radius: 50%; border: 2px solid rgba(126,248,226,.9); transform: translate(-50%, -50%); opacity: 0; }
+#hud.scanning .hud-sweep { animation: sweep 1.6s ease-out 2; }
+@keyframes sweep { from { width: 0; height: 0; opacity: 1; } to { width: 140vmin; height: 140vmin; opacity: 0; } }
+.scanbar { height: 4px; background: var(--rule); border-radius: 2px; overflow: hidden; }
+.scanbar i { display: block; height: 100%; width: 40%; background: var(--seaglass); animation: scanbar 1s ease-in-out infinite alternate; }
+@keyframes scanbar { from { margin-left: 0; } to { margin-left: 60%; } }
+.scan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
+.scan-grid div { background: var(--chart); border: 1px solid var(--rule); border-left: 3px solid var(--c, var(--seaglass)); border-radius: 10px; padding: 8px 10px; }
+.scan-grid b { display: block; font: 700 24px/1.1 var(--display); font-variant-numeric: tabular-nums; }
+.scan-grid span { color: var(--mist); font-size: 12.5px; }
+.sats, .nearest { padding-left: 18px; margin: 6px 0; }
+.sats li, .nearest li { margin: 3px 0; font-size: 14px; }
+.sats small, .nearest small { color: var(--mist); }
+.nearest { list-style: none; padding: 0; }
+.nearest button { background: none; border: 0; color: var(--paper); text-align: left; cursor: pointer; padding: 4px 0; font: inherit; }
+.nearest button:hover b { color: var(--seaglass); }
+@media (max-width: 860px) { #hud .hud-tl, #hud .hud-bl { left: 12px; } #hud .hud-tr { right: 12px; top: 160px; } }

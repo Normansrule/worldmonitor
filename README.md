@@ -23,6 +23,21 @@ Built on [World Monitor](https://github.com/koala73/worldmonitor) by Elie Habib.
 
 ---
 
+## ◎ New in v1.4 — the connected planet
+
+| | |
+|---|---|
+| **Overwatch HUD** | Sensor look 5 (or the *HUD* button): a heads-up display over the globe with a rotating crosshair and live read-outs of what is within range — flights, cameras, power, networks, radio — and the nearest of each. |
+| **Area scan (press S)** | Pulls every public layer together for the spot under the crosshair: aircraft in range, the tracked satellites that can see that spot *right now* (computed with SGP4 look angles), cameras, internet buildings, power plants, radio receivers, weather, local time and the nearest of each, one click away. |
+| **NASA satellite overlays** | Wrap the globe in today’s clouds, rain and snow from the last 30 minutes (IMERG), active fires, last night’s lights, sea-surface temperature, smoke and dust, or snow cover — NASA GIBS images on a transparent shell. |
+| **Power plants** | 10,700 plants ≥ 50 MW from the WRI Global Power Plant Database, coloured by fuel with a fuel filter, capacity, generation and owner. |
+| **Internet exchanges & data centres** | PeeringDB colocation buildings sized by the number of networks inside — where the internet physically meets. |
+| **Live radio receivers** | Public KiwiSDR shortwave receivers worldwide; click one to open it and listen live from that spot on Earth. |
+| **Live ships** | Every AIS-broadcasting vessel in the Baltic from Fintraffic’s open feed, plus Finnish road weather cameras in the camera layer. |
+| **Satellite footprints** | Any satellite card now shows *What can it see right now?* — the circle of Earth inside its horizon. |
+
+---
+
 ## 🔴 New in v1.3
 
 | | |
@@ -121,7 +136,7 @@ flowchart LR
 - **Click anything.** Points, lines and areas open field notes. Bare ground opens a point probe (weather, elevation, local solar time, Sun elevation, nearest plate boundary). A country opens its fact card.
 - **Search** across 1,000+ features — cables, ports, data centres, countries, tours, layers — or press Enter to search the whole world with OpenStreetMap.
 - **Share a view.** The address bar always holds your camera, base map and layers, e.g. `app/#@26.5,56.3,0.35&b=imagery&l=waterways,routes`.
-- **Keyboard:** `/` search · arrows pan · `+`/`−` zoom · double-click zoom in · `R` spin · `1–4` sensor looks · `T` tours · `Q` quiz · `M` measure · `Esc` close.
+- **Keyboard:** `S` area scan · `5` HUD · `/` search · arrows pan · `+`/`−` zoom · double-click zoom in · `R` spin · `1–4` sensor looks · `T` tours · `Q` quiz · `M` measure · `Esc` close.
 
 ---
 
@@ -137,6 +152,7 @@ flowchart LR
 | | Licence-plate readers (Flock and others) — 150,000+ mapped; density grid when zoomed out | OpenStreetMap / DeFlock · Overpass | weekly + on demand |
 | Places | City names (zoom-dependent) · Airports | Natural Earth · OurAirports | static |
 | Live Earth | News pins by topic | GDELT GEO 2.0 | 15 min |
+| Connected planet | Power plants · Internet exchanges & data centres · Live radio receivers · Live ships (Baltic) · NASA overlays | WRI · PeeringDB · KiwiSDR · Fintraffic Digitraffic · NASA GIBS | static / daily / 1 min / 30 min |
 | Civic data | Reported crime (hexagon density + pins) | Chicago · DataSF · NYC Open Data · LA City · data.police.uk | on view |
 | Sky and space | Day and night (terminator, subsolar point) | computed | 1 min |
 | | Space stations + ISS ground track | CelesTrak + SGP4 | 2 s |
@@ -154,7 +170,7 @@ flowchart LR
 <table><tr>
 <td width="55%">
 
-**Twelve lessons** on the [Learn page](https://normansrule.github.io/worldmonitor/learn/), each with the key equation, its sources and a button that opens the idea on the globe:
+**Thirteen lessons** on the [Learn page](https://normansrule.github.io/worldmonitor/learn/), each with the key equation, its sources and a button that opens the idea on the globe:
 
 1. Plate tectonics and earthquakes — `E₂/E₁ = 10^(1.5·ΔM)`
 2. Orbits — Kepler’s third law, `T = 2π√(a³/μ)`
@@ -168,6 +184,7 @@ flowchart LR
 10. How flight tracking works — ADS-B and the standard atmosphere
 11. Cameras, maps and privacy
 12. Reading crime data responsibly
+13. How the internet is wired
 
 </td>
 <td>
@@ -316,7 +333,7 @@ tools/                      data export, camera + ALPR fetchers, setup, screensh
 | [hls.js](https://github.com/video-dev/hls.js) · Apache-2.0 | Live camera video |
 | [Tauri](https://github.com/tauri-apps/tauri) · MIT/Apache-2.0 | Desktop app |
 
-Data: GDELT Project · City of Chicago · DataSF · NYC Open Data · City of Los Angeles · data.police.uk (OGL v3) · Caltrans · NYC DOT · Transport for London (OGL) · Hong Kong Transport Department · 511 Ontario · 511 Alberta · © OpenStreetMap contributors via DeFlock and Overpass · OpenSky Network · airplanes.live · adsbdb (routes looked up live, not stored) · OurAirports · Natural Earth · Panoramax (CC BY-SA) · USGS · NASA EONET · NASA GIBS (*we acknowledge the use of imagery provided by services from NASA’s Global Imagery Browse Services (GIBS), part of NASA’s Earth Science Data and Information System (ESDIS)*) · NOAA SWPC · CelesTrak · adsb.lol (ODbL) · OpenSky Network · Open-Meteo (CC BY 4.0) · REST Countries · World Bank (CC BY 4.0) · Wikipedia (CC BY-SA) · © OpenStreetMap contributors (ODbL) · Esri World Imagery · PB2002 plate boundaries (ODC-BY) · NASA Blue Marble and Black Marble. Full list with licences: [`docs/REFERENCES.md`](docs/REFERENCES.md).
+Data: WRI Global Power Plant Database (CC BY 4.0) · PeeringDB · KiwiSDR receiver owners · Fintraffic / digitraffic.fi (CC BY 4.0) · GDELT Project · City of Chicago · DataSF · NYC Open Data · City of Los Angeles · data.police.uk (OGL v3) · Caltrans · NYC DOT · Transport for London (OGL) · Hong Kong Transport Department · 511 Ontario · 511 Alberta · © OpenStreetMap contributors via DeFlock and Overpass · OpenSky Network · airplanes.live · adsbdb (routes looked up live, not stored) · OurAirports · Natural Earth · Panoramax (CC BY-SA) · USGS · NASA EONET · NASA GIBS (*we acknowledge the use of imagery provided by services from NASA’s Global Imagery Browse Services (GIBS), part of NASA’s Earth Science Data and Information System (ESDIS)*) · NOAA SWPC · CelesTrak · adsb.lol (ODbL) · OpenSky Network · Open-Meteo (CC BY 4.0) · REST Countries · World Bank (CC BY 4.0) · Wikipedia (CC BY-SA) · © OpenStreetMap contributors (ODbL) · Esri World Imagery · PB2002 plate boundaries (ODC-BY) · NASA Blue Marble and Black Marble. Full list with licences: [`docs/REFERENCES.md`](docs/REFERENCES.md).
 
 ## 📄 License
 

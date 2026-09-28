@@ -38,6 +38,10 @@ Every data source, library and reference used by the Terra Atlas globe app. This
 | [NYC Open Data — NYPD Complaint Data Current (Year to Date)](https://data.cityofnewyork.us/d/5uac-w243) | NYC Open Data terms | New York City complaint reports. |
 | [City of Los Angeles — Crime Data from 2020 to Present (LAPD)](https://data.lacity.org/d/2nrs-mtv8) | City of LA open data terms | Los Angeles crime reports. |
 | [data.police.uk — street-level crimes API](https://data.police.uk/docs/) | Open Government Licence v3.0 | England, Wales and Northern Ireland street-level crime. |
+| [Global Power Plant Database v1.3 (World Resources Institute)](https://datasets.wri.org/dataset/globalpowerplantdatabase) | CC BY 4.0 | Power plants of 50 MW and more. |
+| [PeeringDB](https://www.peeringdb.com) | PeeringDB Acceptable Use Policy (public data) | Colocation facilities and internet exchanges. |
+| [KiwiSDR public receiver directory (rx.linkfanel.net / kiwisdr.com)](http://rx.linkfanel.net) | Community directory; receivers run by volunteers | Live shortwave receivers you can listen to. |
+| [Fintraffic Digitraffic (marine AIS and road weather cameras)](https://www.digitraffic.fi/en/) | CC BY 4.0 — Fintraffic / digitraffic.fi | Live ships in the Baltic and Finnish road cameras. |
 | [Open-Meteo forecast & elevation APIs](https://open-meteo.com) | CC BY 4.0 | Weather and ground elevation for any clicked point. |
 | [REST Countries](https://restcountries.com) | MPL-2.0 | Capital, population, languages, currencies for the country card. |
 | [World Bank Open Data API](https://datahelpdesk.worldbank.org/knowledgebase/articles/889392) | CC BY 4.0 | GDP, life expectancy, internet use and renewable share indicators. |

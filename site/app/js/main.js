@@ -18,7 +18,10 @@ import { newsLayer } from './news.js';
 import { crimeLayer } from './crime.js';
 import { installLive } from './live.js';
 import { openWall } from './cameras.js';
-export const VERSION = '1.3';
+import { powerLayer, internetLayer, radioLayer, shipsLayer, overlayLayer } from './networks.js';
+import { installHud } from './hud.js';
+import { smallCircle } from './astro.js';
+export const VERSION = '1.4';
 const NEW_VERSION = (() => { try { return localStorage.getItem('terra-atlas-version') !== VERSION; } catch { return false; } })();
 
 import { ICONS } from './icons.js';
@@ -38,7 +41,7 @@ const state = {
   opts: Object.fromEntries(LAYERS.map((l) => [l.id, Object.fromEntries((l.options ?? []).map((o) => [o.id, structuredClone(o.value)]))])),
   data: {}, chan: {}, lstatus: {}, loadedAt: {},
   hover: null, mode: null, pov: { lat: 20, lng: 0, altitude: 2.4 },
-  tool: { points: [], paths: [], arcs: [], html: [], labels: [] },
+  tool: { points: [], paths: [], arcs: [], html: [], labels: [], rings: [] },
   tour: null, quiz: null, measure: [],
 };
 
@@ -376,6 +379,7 @@ function setLStatus(id, s, note = '') {
   if (dot) { dot.dataset.s = s; dot.title = note || (s === 'ok' ? 'Loaded' : s === 'loading' ? 'Loading…' : ''); }
 }
 const PRESETS = [
+  ['Connected planet', ['sun', 'borders', 'cities', 'cables', 'internet', 'power', 'aircraft', 'ships', 'radio', 'stations', 'satellites']],
   ['Live world', ['sun', 'borders', 'cities', 'quakes', 'events', 'news', 'aircraft', 'stations']],
   ['Aviation', ['sun', 'borders', 'cities', 'airports', 'aircraft']],
   ['Cameras', ['borders', 'cities', 'cameras', 'alpr']],
@@ -519,6 +523,15 @@ async function runAction(kind) {
     };
     if (state.home) return go(...state.home);
     navigator.geolocation?.getCurrentPosition((p) => { state.home = [p.coords.latitude, p.coords.longitude]; go(...state.home); }, () => go(state.pov.lat, state.pov.lng));
+  }
+  if (kind === 'footprint' && ref?.d?.altKm) {
+    const ang = (Math.acos(astro.R_EARTH_KM / (astro.R_EARTH_KM + ref.d.altKm)) * 180) / Math.PI;
+    state.tool.paths = [{ pts: smallCircle(ref.d.lat, ref.d.lng, ang, 180).map(([a, b]) => [a, b, 0.004]), color: '#9fe3ff', stroke: 0.9, passive: true }];
+    state.tool.rings = [{ lat: ref.d.lat, lng: ref.d.lng, color: '#9fe3ff', maxR: ang / Math.max(zk(), 0.001), speed: ang / Math.max(zk(), 0.001), period: 2200 }];
+    compose();
+    const areaFrac = (1 - Math.cos((ang * Math.PI) / 180)) / 2;
+    if (out) out.innerHTML = `<p>From ${Math.round(ref.d.altKm).toLocaleString()} km up it can see a circle ${Math.round((ang * Math.PI / 180) * astro.R_EARTH_KM).toLocaleString()} km in radius — about ${(areaFrac * 100).toFixed(1)} % of Earth’s surface. Anyone inside the cyan circle could in principle see it above their horizon.</p>`;
+    globe.pointOfView({ lat: ref.d.lat, lng: ref.d.lng, altitude: Math.max(state.pov.altitude, 1.8) }, reduceMotion ? 0 : 1200);
   }
   if (kind === 'crime-goto' && ref?.d?.goto) globe.pointOfView({ lat: ref.d.goto.lat, lng: ref.d.goto.lng, altitude: 0.03 }, reduceMotion ? 0 : 1800);
   if (kind === 'zoom-alpr' && ref?.d) globe.pointOfView({ lat: ref.d.lat, lng: ref.d.lng, altitude: 0.25 }, reduceMotion ? 0 : 1500);
@@ -675,7 +688,8 @@ async function countryCard(f, lat, lng) {
 // ------------------------------------------------------------------ pins / tool overlays
 function pinEl(cls) { const d = document.createElement('div'); d.className = `pin ${cls}`; return d; }
 function setPins(pins) { state.tool.html = pins.map((p) => ({ lat: p.lat, lng: p.lng, el: pinEl(p.cls) })); compose(); }
-function clearTool() { state.tool = { points: [], paths: [], arcs: [], html: [], labels: [] }; compose(); }
+function clearTool() { state.tool = { points: [], paths: [], arcs: [], html: [], labels: [], rings: [] }; compose(); }
+function pulse(lat, lng, rKm) { const ring = { lat, lng, color: '#7ed6c4', maxR: rKm / 111 / Math.max(zk(), 0.001), speed: rKm / 111 / 0.9 / Math.max(zk(), 0.001), period: 900 }; state.tool.rings.push(ring); compose(); setTimeout(() => { state.tool.rings = state.tool.rings.filter((r) => r !== ring); compose(); }, 3200); }
 function setHover(c) {
   if (c === state.hover) return;
   state.hover = c; $('#globe').style.cursor = c && !state.mode ? 'pointer' : state.mode === 'measure' || state.mode === 'quiz' ? 'crosshair' : '';
@@ -1004,33 +1018,37 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ------------------------------------------------------------------ sensor looks (idea from God's Eye View, MIT)
-const LOOKS = ['normal', 'nvg', 'flir', 'crt'];
+const LOOKS = ['normal', 'nvg', 'flir', 'crt', 'hud'];
 function setLook(look) {
   state.look = LOOKS.includes(look) ? look : 'normal';
   document.body.dataset.look = state.look;
+  hud?.show(state.look === 'hud');
   document.querySelectorAll('[data-look]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.look === state.look)));
 }
 document.querySelectorAll('[data-look]').forEach((b) => b.addEventListener('click', () => setLook(b.dataset.look)));
-document.addEventListener('keydown', (e) => { if (!e.target.matches('input, select, textarea') && /^[1-4]$/.test(e.key)) setLook(LOOKS[Number(e.key) - 1]); });
+document.addEventListener('keydown', (e) => { if (!e.target.matches('input, select, textarea') && /^[1-5]$/.test(e.key)) setLook(LOOKS[Number(e.key) - 1]); });
+let hud = null;
 $('#gibs-date-input').max = new Date(Date.now() - 24 * 3600_000).toISOString().slice(0, 10);
 $('#gibs-date-input').value = gibsDate();
 $('#gibs-date-input').addEventListener('change', (e) => { state.gibsDate = e.target.value || null; applyBase(); });
 
 // ------------------------------------------------------------------ plug-in layers (flights, cameras, places)
-const api = { globe, state, esc, $, reduceMotion, openNotes, isOpen, refreshLayer, fly, followTo, setBase, wmo: (c) => WMO[c] ?? '—', select, toast: (m) => toast(m), toggleLayer: (id, on) => toggleLayer(id, on), openWall: () => openWall(api) };
+const api = { LAYERS, pulse: (a, b, c) => pulse(a, b, c), globe, state, esc, $, reduceMotion, openNotes, isOpen, refreshLayer, fly, followTo, setBase, wmo: (c) => WMO[c] ?? '—', select, toast: (m) => toast(m), toggleLayer: (id, on) => toggleLayer(id, on), openWall: () => openWall(api) };
 {
   const add = (layer, afterId) => { const i = LAYERS.findIndex((l) => l.id === afterId); LAYERS.splice(i + 1, 0, layer); layerById[layer.id] = layer; };
   add(flightsLayer(api), 'events');
   add(camerasLayer(api), 'aurora'); add(alprLayer(api), 'cameras');
   add(citiesLayer, 'grid'); add(airportsLayer, 'cities');
   add(newsLayer, 'aircraft'); add(crimeLayer, 'alpr');
+  add(shipsLayer, 'news'); add(radioLayer, 'alpr'); add(overlayLayer(api), 'satellites');
+  add(internetLayer, 'cables'); add(powerLayer, 'nuclear');
   crimeLayer.group = 'civic';
   for (const id of ['aircraft', 'news', 'cameras', 'alpr', 'crime', 'cities', 'airports']) layerById[id].fresh = true;
   layerById.aircraft.on = true; layerById.cameras.on = true;
   GROUPS.splice(1, 0, { id: 'cams', label: 'Cameras' });
   GROUPS.splice(3, 0, { id: 'places', label: 'Places' });
   GROUPS.splice(2, 0, { id: 'civic', label: 'Civic data' });
-  for (const l of [layerById.aircraft, layerById.cameras, layerById.alpr, layerById.cities, layerById.airports, layerById.news, layerById.crime]) {
+  for (const l of [layerById.aircraft, layerById.cameras, layerById.alpr, layerById.cities, layerById.airports, layerById.news, layerById.crime, layerById.ships, layerById.radio, layerById.overlay, layerById.internet, layerById.power]) {
     state.opts[l.id] = Object.fromEntries((l.options ?? []).map((o) => [o.id, structuredClone(o.value)]));
     if (l.on && (NEW_VERSION || !location.hash.includes('&l='))) state.on.add(l.id);
   }
@@ -1054,10 +1072,21 @@ for (const id of state.on) refreshLayer(id);
 $('#apply-now').addEventListener('click', applyPending);
 $('#apply-undo').addEventListener('click', () => { state.pending.clear(); renderLayerPanel(); });
 const live = installLive(api);
+hud = installHud(api);
+if (state.look === 'hud') hud.show(true);
 if (NEW_VERSION) { setTimeout(whatsNew, 600); try { localStorage.setItem('terra-atlas-version', VERSION); } catch { /* private mode */ } }
 else if (!location.hash.includes('@') && !isMobile) welcome();
 function whatsNew() {
-  openNotes(`What’s new in v${VERSION}`, `<h3>The planet, live</h3>
+  openNotes(`What’s new in v${VERSION}`, `<h3>The connected planet</h3>
+    <p class="sub">v1.4 adds the Overwatch HUD, NASA satellite overlays, power plants, internet buildings, live radio receivers and ships.</p>
+    <div class="starts">
+      <button class="tour-card" data-start="hud"><b>◎ Overwatch HUD + Area scan</b><span>A heads-up display over the globe; press S to scan everything around the crosshair — flights, satellites overhead, cameras, networks, power, weather.</span></button>
+      <button class="tour-card" data-start="rain"><b>☂ Rain falling right now</b><span>NASA’s 30-minute global precipitation wrapped around the globe. Also clouds, fires, night lights, ocean temperature, smoke, snow.</span></button>
+      <button class="tour-card" data-start="connected"><b>⌁ The connected planet</b><span>Cables, internet exchanges, 10,700 power plants, flights and ships in one view.</span></button>
+      <button class="tour-card" data-start="radio"><b>📻 Listen live</b><span>Public shortwave receivers around the world — click one and tune the radio from that spot.</span></button>
+      <button class="tour-card" data-start="ships"><b>⚓ Live ships</b><span>Every vessel broadcasting AIS in the Baltic, refreshed each minute.</span></button>
+    </div>
+    <h4>From v1.3</h4>
     <p class="sub">Look for the <em class="new">new</em> tags in Layers, the red Live ticker at the top, and these one-click starts:</p>
     <div class="starts">
       <button class="tour-card" data-start="flights"><b>✈ Every flight in the sky</b><span>Live plane pointers on their real headings. Click one for the seatback flight view.</span></button>
@@ -1072,6 +1101,11 @@ document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-start]'); if (!b) return;
   const k = b.dataset.start;
   const setLayers = (ids) => { state.pending.clear(); for (const l of LAYERS) if (ids.includes(l.id) !== state.on.has(l.id)) state.pending.set(l.id, ids.includes(l.id)); applyPending(); };
+  if (k === 'hud') { setLook('hud'); globe.pointOfView({ lat: 34.05, lng: -118.25, altitude: 0.12 }, 1800); setTimeout(() => hud.scan(), 2400); }
+  if (k === 'rain') { state.opts.overlay.kind = 'rain'; delete state.data.overlay; setLayers(['sun', 'borders', 'cities', 'overlay']); globe.pointOfView({ lat: 10, lng: 110, altitude: 2.4 }, 1800); showLearn('overlay'); }
+  if (k === 'connected') { preset(0); globe.pointOfView({ lat: 45, lng: 5, altitude: 1.4 }, 1800); }
+  if (k === 'radio') { setLayers(['sun', 'borders', 'cities', 'radio']); globe.pointOfView({ lat: 45, lng: -20, altitude: 2 }, 1800); showLearn('radio'); }
+  if (k === 'ships') { setLayers(['borders', 'cities', 'ships']); globe.pointOfView({ lat: 59.8, lng: 24.5, altitude: 0.25 }, 1800); showLearn('ships'); }
   if (k === 'flights') { setLayers(['sun', 'borders', 'cities', 'aircraft', 'airports']); globe.pointOfView({ lat: 38, lng: -95, altitude: 1.3 }, 1800); showLearn('aircraft'); }
   if (k === 'cams') { setLayers(['borders', 'cities', 'cameras', 'alpr']); globe.pointOfView({ lat: 34.05, lng: -118.25, altitude: 0.05 }, 2000); showLearn('cameras'); setTimeout(() => api.openWall(), 3500); }
   if (k === 'news') { setLayers(['sun', 'borders', 'cities', 'news']); globe.pointOfView({ lat: 25, lng: 20, altitude: 2.3 }, 1800); showLearn('news'); }

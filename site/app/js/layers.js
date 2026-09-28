@@ -214,7 +214,7 @@ export const LAYERS = [
           ['Orbital period', `${per.toFixed(1)} min — ${(1440 / per).toFixed(1)} orbits a day`], ['NORAD id', p.norad], ['Position', `${fmtLat(p.lat)}, ${fmtLng(p.lng)}`]],
         body: 'At this height the station is still inside a thin trace of atmosphere, so drag slowly lowers its orbit and it needs periodic re-boosts. The yellow line is its ground track: the orbit stays fixed in space while Earth turns underneath, so each pass shifts about 23° west.',
         links: [{ label: 'NASA — Spot the Station', url: 'https://spotthestation.nasa.gov' }, wiki(p.name)],
-        actions: [['passes', 'When can I see it from here?'], ['orbit', 'Show its full orbit']],
+        actions: [['passes', 'When can I see it from here?'], ['orbit', 'Show its full orbit'], ['footprint', 'What can it see right now?']],
       };
     },
     learn: {
@@ -478,7 +478,7 @@ function describeSat(p) {
       ['Eccentricity', el.ecc.toFixed(4)], ['Now over', `${fmtLat(p.lat)}, ${fmtLng(p.lng)}`]],
     body: el.cls.startsWith('Geostationary') ? 'It circles once per sidereal day above the equator, so from the ground it seems to hang still — which is why satellite dishes never move.' : el.cls.startsWith('Medium') ? 'Navigation constellations like GPS, Galileo and GLONASS live in medium Earth orbit, high enough that each satellite sees a third of the planet.' : 'In low Earth orbit a satellite laps the planet every hour and a half and sees only a small patch of ground at a time — good for imaging, bad for coverage.',
     links: [{ label: 'CelesTrak record', url: `https://celestrak.org/satcat/table-satcat.php?CATNR=${p.norad}` }, { label: 'N2YO live tracker', url: `https://www.n2yo.com/satellite/?s=${p.norad}` }],
-    actions: [['orbit', 'Show its full orbit'], ['passes', 'When can I see it from here?']],
+    actions: [['orbit', 'Show its full orbit'], ['footprint', 'What can it see right now?'], ['passes', 'When can I see it from here?']],
   };
 }
 function title(s) { return String(s).toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()); }

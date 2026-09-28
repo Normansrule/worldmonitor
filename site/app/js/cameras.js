@@ -20,7 +20,7 @@ export function stopCameraMedia() { clearInterval(camTimer); camTimer = null; if
 export function camerasLayer(api) {
   return {
     id: 'cameras', group: 'cams', label: 'Live traffic cameras', swatch: '#7ed6c4', on: false, viewDependent: true, pin: 'camera',
-    sources: ['caltrans', 'nycdot', 'tfl', 'hktd', 'on511', 'ab511'],
+    sources: ['caltrans', 'nycdot', 'tfl', 'hktd', 'digitraffic', 'on511', 'ab511'],
     async load() {
       const d = await getLocal('data/cameras.json').catch(() => { throw new Error('the camera list has not been collected yet — run the “Refresh camera data” workflow once (see the README)'); });
       const src = d.sources.map((s) => s.name);
@@ -38,7 +38,7 @@ export function camerasLayer(api) {
     describeLayer: (d) => ({ rows: [['Cameras', d.cams.length.toLocaleString()], ['Collected', new Date(d.at).toUTCString()], ...d.src.map((s) => [s.name, `${s.count.toLocaleString()} cameras`])] }),
     open: (c) => openCamera(c, api),
     learn: {
-      what: 'Public road cameras published by transport agencies in California, New York City, London and Hong Kong (plus Ontario and Alberta when their feeds respond). Zoom in to see camera pins; click one to watch it. Most show a still image that refreshes every 15 seconds; many Caltrans cameras stream live video and London’s JamCams play a short recent clip.',
+      what: 'Public road cameras published by transport agencies in California, New York City, London, Hong Kong and Finland (plus Ontario and Alberta when their feeds respond). Zoom in to see camera pins; click one to watch it. Most show a still image that refreshes every 15 seconds; many Caltrans cameras stream live video and London’s JamCams play a short recent clip.',
       how: 'Agencies publish open lists of their cameras with a snapshot address. A GitHub Action collects the lists every day into one file for this site; the pictures themselves always come straight from the agency when you open a camera, so they are as fresh as the agency makes them.',
       try: 'Open a freeway camera at rush hour, then switch on Live flights near the same city and watch the approach path overhead.',
       refs: ['caltrans', 'nycdot', 'tfl', 'hktd', 'on511', 'ab511'],
