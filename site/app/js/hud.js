@@ -51,7 +51,7 @@ export function installHud(api) {
 
   function tick() {
     if (el.hidden) return;
-    const p = state.pov; const now = new Date();
+    const p = state.pov; const now = api.now();
     $('#hud-time').textContent = `${now.toISOString().slice(11, 19)} UTC · local solar ${localSolarTime(p.lng, now)}`;
     $('#hud-pos').textContent = `${fmtLat(p.lat)}  ${fmtLng(p.lng)}`;
     $('#hud-alt').textContent = `eye ${Math.round(p.altitude * 6371).toLocaleString()} km · sun ${solarElevation(p.lat, p.lng, now).toFixed(0)}°`;
@@ -68,7 +68,7 @@ export function installHud(api) {
     el.classList.remove('scanning'); void el.offsetWidth; el.classList.add('scanning');
     api.pulse(p.lat, p.lng, r);
     api.openNotes('Area scan', `<div class="scan"><p class="kicker">Scanning ${km(r)} around ${fmtLat(p.lat)}, ${fmtLng(p.lng)}…</p><div class="scanbar"><i></i></div></div>`, 'scan');
-    const now = new Date();
+    const now = api.now();
     const cityP = getLocal('data/cities.json').then((d) => d.rows.map(([name, lat, lng, pop, , cc]) => ({ name, lat, lng, pop, cc })).map((c) => ({ ...c, d: haversineKm(p.lat, p.lng, c.lat, c.lng) })).sort((a, b) => a.d - b.d)[0]).catch(() => null);
     const wxP = getFeed('openmeteo', `https://api.open-meteo.com/v1/forecast?latitude=${p.lat.toFixed(3)}&longitude=${p.lng.toFixed(3)}&current=temperature_2m,weather_code,wind_speed_10m,cloud_cover,visibility&timezone=auto`).catch(() => null);
     const satP = Promise.all(['stations', 'visual', 'gps-ops', 'weather'].map((g) => loadGroup(g).then((x) => (x.snapshot ? [] : x.sats)).catch(() => []))).then((gs) => overhead(gs.flat(), p.lat, p.lng, now));
@@ -90,7 +90,7 @@ export function installHud(api) {
       ${wx ? section('Conditions', `<p>${api.wmo(wx.current.weather_code)}, ${wx.current.temperature_2m} °C, wind ${wx.current.wind_speed_10m} km/h, cloud ${wx.current.cloud_cover} %, visibility ${Math.round((wx.current.visibility ?? 0) / 1000)} km. Local time ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: wx.timezone })} (${esc(wx.timezone)}). Sun ${solarElevation(p.lat, p.lng, now).toFixed(0)}° above the horizon.</p>`) : ''}
       ${sats.length ? section('Satellites that can see this spot right now', `<ol class="sats">${sats.slice(0, 10).map((s) => `<li><b>${esc(s.name)}</b> <small>${Math.round(s.el)}° up, towards the ${compass(s.az)} · ${Math.round(s.rangeKm).toLocaleString()} km away</small></li>`).join('')}</ol><p class="muted">From the brightest satellites, space stations, GPS and weather groups. Thousands more (Starlink, debris) are overhead too.</p>`) : ''}
       ${near.length ? section('Nearest of each', `<ul class="nearest">${near.map((x) => `<li><button data-scanref="${esc(x.l.id)}">${esc(x.l.label)}: <b>${esc(String(x.best.p.label ?? x.best.p.ref?.d?.name ?? x.best.p.ref?.d?.call ?? '').slice(0, 60) || 'nearest item')}</b> <small>${km(x.best.d)}</small></button></li>`).join('')}</ul>`) : section('Tip', '<p>Switch on more layers (presets are at the top of the Layers panel) and scan again — every active layer is included.</p>')}
-      <div class="row"><button class="btn" data-hudscan="1">Scan again</button><button class="btn ghost" data-wall="1">Camera wall here</button></div>
+      <div class="row"><button class="btn" data-hudscan="1">Scan again</button><button class="btn ghost" data-trace="${p.lat},${p.lng}">Trace connections</button><button class="btn ghost" data-wall="1">Camera wall here</button></div>
     </div>`, 'scan');
     const refs = Object.fromEntries(near.map((x) => [x.l.id, x.best.p.ref]));
     document.querySelectorAll('[data-scanref]').forEach((b) => b.addEventListener('click', () => refs[b.dataset.scanref] && api.select(refs[b.dataset.scanref])));

@@ -21,9 +21,13 @@ import { openWall } from './cameras.js';
 import { powerLayer, internetLayer, radioLayer, shipsLayer, overlayLayer } from './networks.js';
 import { installHud } from './hud.js';
 import { MarkerRenderer, GeoIndex, iconsReady } from './markers.js';
-import { installPerformance } from './perf.js';
+import { installPerformance, installProgramKeeper } from './perf.js';
+import { clock, SPEEDS, speedLabel } from './clock.js';
+import { launchesLayer, alertsLayer, countdown } from './launches.js';
+import { installTrace } from './trace.js';
+import { windLayer } from './wind.js';
 import { smallCircle } from './astro.js';
-export const VERSION = '1.5';
+export const VERSION = '1.6';
 const NEW_VERSION = (() => { try { return localStorage.getItem('terra-atlas-version') !== VERSION; } catch { return false; } })();
 
 import { ICONS } from './icons.js';
@@ -59,7 +63,7 @@ const TEX = {
   bluemarble: { img: 'textures/earth-blue-marble.jpg', bump: 'textures/earth-topology.png', attr: 'NASA Blue Marble, relief from three-globe' },
   night: { img: 'textures/earth-night.jpg', attr: 'NASA Black Marble city lights' },
 };
-let markers = null;
+let markers = null; let keeper = null;
 let perf = { q: { pins: 140, pinsPerLayer: 40, cards: 24, labels: 120, columns: 30000 }, moving() {} };
 readHash();
 
@@ -107,7 +111,7 @@ const nightShade = new THREE.Mesh(
 nightShade.visible = false; nightShade.raycast = () => {};
 function updateShade() { nightShade.visible = state.on.has('sun') && state.base !== 'daynight'; }
 function updateSun() {
-  const s = astro.subsolarPoint(new Date());
+  const s = astro.subsolarPoint(clock.date());
   const c = globe.getCoords(s.lat, s.lng, 0);
   dayNightMaterial.uniforms.sunDir.value.set(c.x, c.y, c.z).normalize();
 }
@@ -120,7 +124,7 @@ function applyZoomScale(force = false) {
   const a = state.pov.altitude;
   if (!force && Math.abs(Math.log(a / zkAlt)) < 0.3) return;
   zkAlt = a;
-  markers?.rescale(zk());
+  markers?.rescale(zk()); keeper?.schedule();
   globe.pathStroke((d) => (d.stroke == null ? null : d.stroke * zk()))
     .arcStroke((d) => (d.stroke == null ? null : d.stroke * zk()))
     .ringMaxRadius((d) => d.maxR * zk());
@@ -148,12 +152,12 @@ globe
   .pathDashLength((d) => (d.dash ? d.dash[0] : d.animate ? 0.12 : 1))
   .pathDashGap((d) => (d.dash ? d.dash[1] : d.animate ? 0.015 : 0))
   .pathDashAnimateTime((d) => (d.animate && !reduceMotion ? 40000 : 0))
-  .onPathClick((d) => d.ref && !d.passive && select(d.ref))
+  .onPathClick((d, e, c) => (d.ref && !d.passive ? select(d.ref) : groundClick(e, c)))
   // arcs
   .arcStartLat('sLat').arcStartLng('sLng').arcEndLat('eLat').arcEndLng('eLng').arcColor('color').arcStroke('stroke')
   .arcAltitude((d) => d.alt ?? null).arcDashLength((d) => d.dashLen ?? 1).arcDashGap((d) => d.dashGap ?? 0)
   .arcDashAnimateTime((d) => (reduceMotion ? 0 : d.animMs ?? 0)).arcLabel((d) => d.tip ?? '').arcsTransitionDuration(0)
-  .onArcClick((d) => d.ref && select(d.ref))
+  .onArcClick((d, e, c) => (d.ref ? select(d.ref) : groundClick(e, c)))
   // polygons
   .polygonGeoJsonGeometry('geometry').polygonAltitude('alt').polygonLabel((d) => d.tip ?? '')
   .polygonSideColor('side').polygonsTransitionDuration(0)
@@ -168,6 +172,9 @@ globe
   // particles (satellites, aurora)
   .particlesList('pts').particleLat('lat').particleLng('lng').particleAltitude('alt')
   .particlesColor('color').particlesSize('size').particlesSizeAttenuation(false).particleLabel(() => '').customLayerLabel(() => '')
+  // Clicks on background dots, custom meshes and hexagons fall through to the ground beneath them —
+  // otherwise dense layers (cameras, receivers, ships) swallow clicks meant for the map.
+  .onParticleClick((_d, e, c) => groundClick(e, c)).onCustomLayerClick((_d, e, c) => groundClick(e, c)).onHexClick((_d, e, c) => groundClick(e, c))
   // html (pins)
   .htmlLat('lat').htmlLng('lng').htmlAltitude((d) => d.alt ?? 0).htmlElement('el').htmlTransitionDuration(0)
   // hexagon columns (crime density)
@@ -186,6 +193,7 @@ restylePolygons();
 zkAlt = state.pov.altitude; applyZoomScale(true);
 globe.scene().add(nightShade);
 markers = new MarkerRenderer(globe);
+keeper = installProgramKeeper(globe);
 globe.scene().add(markers.object);
 setTimeout(() => markers.warm(globe.renderer(), globe.scene(), globe.camera()), 1200);
 iconsReady.then(() => { compose.last.points = null; scheduleCompose(); });
@@ -270,7 +278,7 @@ const viewOf = (pov) => {
   const a = pov.altitude; const horizon = Math.acos(1 / (1 + a)) * astro.R_EARTH_KM; // km to the horizon
   return { lat: pov.lat, lng: pov.lng, altitude: a, radiusKm: Math.min(horizon, a * astro.R_EARTH_KM * 0.95 + 5) };
 };
-const ctx = () => ({ now: new Date(), base: state.base, hover: state.hover, pov: state.pov, view: viewOf(state.pov), outlineMesh, globe, THREE });
+const ctx = () => ({ now: clock.date(), live: clock.isLive(), base: state.base, hover: state.hover, pov: state.pov, view: viewOf(state.pov), outlineMesh, globe, THREE });
 
 const meshCache = {};
 function outlineMesh(key, features, color = 0xeef3f6, opacity = 0.3, alt = 0.004) {
@@ -329,6 +337,7 @@ function compose() {
     if (prev && prev.length === sig.length && prev.every((x, i) => x === sig[i])) continue;
     compose.last[k] = sig;
     SETTERS[k](sig);
+    if (k === 'paths' || k === 'arcs' || k === 'rings' || k === 'hexes' || k === 'polygons') keeper?.schedule();
   }
 }
 
@@ -339,7 +348,9 @@ compose.last = {};
 state.index = new GeoIndex(0.5); state.elevated = [];
 function markerPass(acc) {
   const v = viewOf(state.pov); const q = perf.q;
+  markers.setCamera(state.pov.altitude);
   const pts = acc.points; const labels = acc.labels;
+  const selD = state.selected?.d;
   const pins = []; const cols = [];
   if (v.altitude <= 1.1) {
     const perLayer = {}; const lat0 = v.lat; const cosl = Math.cos(lat0 * Math.PI / 180);
@@ -352,24 +363,28 @@ function markerPass(acc) {
       cand.push({ p, km, l });
     }
     cand.sort((x, y) => x.km - y.km);
+    // The thing you clicked always stays a pin — it is never clustered away or dropped when you zoom in.
+    const si = selD ? cand.findIndex((c) => c.p.ref?.d === selD) : -1;
+    if (si > 0) cand.unshift(cand.splice(si, 1)[0]);
     // Declutter in screen space, like a web map: the nearest markers win, cards never overlap,
     // and markers too close to a kept one fold into it as a "+N" cluster badge.
-    const placed = []; const cards = [];
+    const placed = []; const cards = []; state.clustered = [];
     for (const c of cand) {
-      if (pins.length >= q.pins || (perLayer[c.l.id] ?? 0) >= q.pinsPerLayer) { cols.push(c.p); continue; }
-      const sc = globe.getScreenCoords(c.p.lat, c.p.lng, Math.min(c.p.alt ?? 0.005, 0.02));
+      const isSel = !!selD && c.p.ref?.d === selD;
+      if (!isSel && (pins.length >= q.pins || (perLayer[c.l.id] ?? 0) >= q.pinsPerLayer)) { cols.push(c.p); continue; }
+      const sc = globe.getScreenCoords(c.p.lat, c.p.lng, markers.floatAlt);
       if (!sc || sc.x < -40 || sc.y < -40 || sc.x > innerWidth + 40 || sc.y > innerHeight + 40) { cols.push(c.p); continue; }
       const hitsCard = cards.some((r) => sc.x + 12 > r.x0 && sc.x - 12 < r.x1 && sc.y > r.y0 && sc.y - 34 < r.y1);
       const near = placed.find((o) => Math.abs(o.x - sc.x) < 22 && Math.abs(o.y - sc.y) < 26) ?? (hitsCard ? placed.reduce((b, o) => (!b || Math.hypot(o.x - sc.x, o.y - sc.y) < Math.hypot(b.x - sc.x, b.y - sc.y) ? o : b), null) : null);
-      if (near) { near.pin.more = (near.pin.more ?? 0) + 1; cols.push(c.p); continue; }
+      if (near && !isSel) { near.pin.more = (near.pin.more ?? 0) + 1; if (v.altitude > 0.3) cols.push(c.p); else state.clustered.push(c.p); continue; } // up close the "+N" badge stands in for the column
       perLayer[c.l.id] = (perLayer[c.l.id] ?? 0) + 1;
       const icon = typeof c.l.pin === 'function' ? c.l.pin(c.p.ref.d) : c.l.pin;
       const [title, sub] = tipParts(c.p);
       const rect = { x0: sc.x, x1: sc.x + 36 + Math.min(240, 7.2 * Math.max(title.length, sub.length * 0.9)), y0: sc.y - 44, y1: sc.y - 12 };
-      const cardFree = cards.length < q.cards && !cards.some((r) => r.x0 < rect.x1 && rect.x0 < r.x1 && r.y0 < rect.y1 && rect.y0 < r.y1)
+      const cardFree = isSel || cards.length < q.cards && !cards.some((r) => r.x0 < rect.x1 && rect.x0 < r.x1 && r.y0 < rect.y1 && rect.y0 < r.y1)
         && !placed.some((o) => o.x + 12 > rect.x0 + 30 && o.x - 12 < rect.x1 && o.y > rect.y0 && o.y - 34 < rect.y1);
       if (cardFree) cards.push(rect);
-      const pin = { lat: c.p.lat, lng: c.p.lng, alt: Math.min(c.p.alt ?? 0.005, 0.02), icon, color: solid(c.p.color, c.l.swatch), title, sub, detailed: cardFree, ref: c.p.ref, tip: c.p.tip };
+      const pin = { lat: c.p.lat, lng: c.p.lng, alt: c.p.alt, icon, color: solid(c.p.color, c.l.swatch), title, sub, detailed: cardFree, selected: isSel, ref: c.p.ref, tip: c.p.tip };
       pins.push(pin); placed.push({ x: sc.x, y: sc.y, pin });
     }
   } else cols.push(...pts);
@@ -394,8 +409,7 @@ function cullSprites() {
   const c = globe.camera().position; const cl = c.length();
   for (const sp of markers.pool) {
     if (!sp.userData.d) continue;
-    const want = sp.userData.d && markers.pins.concat(markers.labels).includes(sp.userData.d);
-    if (!want) { sp.visible = false; continue; }
+    if (!sp.userData.want) { sp.visible = false; continue; }
     const p = sp.position; sp.visible = (p.x * c.x + p.y * c.y + p.z * c.z) / (p.length() * cl) > (R * 1.0) / cl - 0.002;
   }
 }
@@ -413,6 +427,14 @@ setInterval(() => {
   for (const l of LAYERS) if (l.refresh && state.on.has(l.id) && now - (state.loadedAt[l.id] ?? 0) >= l.refresh) refreshLayer(l.id);
   updateSun();
 }, 1000);
+// Time machine: while the clock runs faster than real time (or has been moved), time-driven layers
+// (Sun, stations, satellites, earthquake replay) are recomputed several times a second.
+setInterval(() => {
+  if (clock.isLive()) return;
+  updateSun();
+  for (const l of LAYERS) if (l.timeDriven && state.on.has(l.id) && state.data[l.id]) state.chan[l.id] = l.channels(state.data[l.id], ctx());
+  scheduleCompose();
+}, 300);
 
 // ------------------------------------------------------------------ layer panel
 function countOf(id) {
@@ -431,7 +453,9 @@ function setLStatus(id, s, note = '') {
 }
 const PRESETS = [
   ['Connected planet', ['sun', 'borders', 'cities', 'cables', 'internet', 'power', 'aircraft', 'ships', 'radio', 'stations', 'satellites']],
-  ['Live world', ['sun', 'borders', 'cities', 'quakes', 'events', 'news', 'aircraft', 'stations']],
+  ['Live world', ['sun', 'borders', 'cities', 'quakes', 'events', 'alerts', 'news', 'aircraft', 'stations', 'launches']],
+  ['Weather', ['sun', 'borders', 'cities', 'wind', 'events', 'alerts']],
+  ['Space & time', ['sun', 'borders', 'stations', 'satellites', 'launches', 'aurora']],
   ['Aviation', ['sun', 'borders', 'cities', 'airports', 'aircraft']],
   ['Cameras', ['borders', 'cities', 'cameras', 'alpr']],
   ['Crime & civic', ['borders', 'cities', 'crime', 'cameras']],
@@ -526,7 +550,7 @@ function openNotes(title, html, key = null) {
   $('#notes').classList.add('open');
   $('#notes-body').scrollTop = 0;
 }
-function closeNotes() { $('#notes').classList.remove('open'); stopCameraMedia(); state.notesKey = null; if (flightState.selected) { flightState.selected = null; flightState.follow = false; refreshLayer('aircraft', { soft: true }); } }
+function closeNotes() { $('#notes').classList.remove('open'); stopCameraMedia(); state.notesKey = null; if (state.selected) { state.selected = null; compose.forceMarkers = true; scheduleCompose(); } if (flightState.selected) { flightState.selected = null; flightState.follow = false; refreshLayer('aircraft', { soft: true }); } }
 const isOpen = (key) => state.notesKey === key && $('#notes').classList.contains('open');
 const linksHtml = (links) => (links?.length ? `<div class="links">${links.filter((l) => l.url).map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}</a>`).join('')}</div>` : '');
 const rowsHtml = (rows) => (rows?.length ? `<dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : '');
@@ -537,7 +561,7 @@ function select(ref) {
   if (l?.open) return l.open(ref.d);
   if (!l?.describe) return showLearn(ref.layer);
   const c = l.describe(ref.d);
-  state.selected = ref;
+  state.selected = ref; compose.forceMarkers = true; scheduleCompose();
   const key = `sel:${ref.layer}:${c.title}`;
   openNotes(l.label, `
     <div id="sel-wiki"></div>
@@ -584,6 +608,10 @@ async function runAction(kind) {
     if (out) out.innerHTML = `<p>From ${Math.round(ref.d.altKm).toLocaleString()} km up it can see a circle ${Math.round((ang * Math.PI / 180) * astro.R_EARTH_KM).toLocaleString()} km in radius — about ${(areaFrac * 100).toFixed(1)} % of Earth’s surface. Anyone inside the cyan circle could in principle see it above their horizon.</p>`;
     globe.pointOfView({ lat: ref.d.lat, lng: ref.d.lng, altitude: Math.max(state.pov.altitude, 1.8) }, reduceMotion ? 0 : 1200);
   }
+  if (kind === 'launch-azimuth' && ref?.d) {
+    const boost = 465.1 * Math.cos((ref.d.lat * Math.PI) / 180);
+    if (out) out.innerHTML = `<p>Earth’s spin carries this pad east at <b>${Math.round(boost)} m/s</b> (${Math.round(boost * 3.6).toLocaleString()} km/h) — free speed for a rocket launching east. Orbit needs about 7,800 m/s, so that is ${((boost / 7800) * 100).toFixed(1)} % of the job done before lift-off. A pad’s latitude is also the lowest orbital inclination it can reach directly (${Math.abs(ref.d.lat).toFixed(1)}° here), which is why equatorial sites such as Kourou are prized for geostationary missions, and why most pads face an ocean: spent stages must fall on water.</p>`;
+  }
   if (kind === 'crime-goto' && ref?.d?.goto) globe.pointOfView({ lat: ref.d.goto.lat, lng: ref.d.goto.lng, altitude: 0.03 }, reduceMotion ? 0 : 1800);
   if (kind === 'zoom-alpr' && ref?.d) globe.pointOfView({ lat: ref.d.lat, lng: ref.d.lng, altitude: 0.25 }, reduceMotion ? 0 : 1500);
   if (kind === 'near-flights' && ref?.d) { state.opts.aircraft.scope = 'near'; delete state.data.aircraft; toggleLayer('aircraft', true); renderLayerPanel(); globe.pointOfView({ lat: ref.d.lat, lng: ref.d.lng, altitude: 0.08 }, reduceMotion ? 0 : 1500); }
@@ -625,10 +653,15 @@ document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('cli
 }));
 
 // ------------------------------------------------------------------ surface clicks: probe + country card
+function groundClick(e, c) {
+  const g = c?.lat != null ? c : globe.toGlobeCoords(e.offsetX, e.offsetY); if (!g) return;
+  surfaceClick(g.lat, g.lng, state.on.has('borders') ? countryAt(g.lat, g.lng) : null);
+}
 function surfaceClick(lat, lng, country) {
   if (state.clickConsumed) return; // a marker already handled this click (globe.gl's own click can arrive a frame later)
   if (state.mode === 'measure') return measureClick(lat, lng);
   if (state.mode === 'quiz') return quizClick(lat, lng);
+  if (state.mode === 'trace') return tracer.trace(lat, lng);
   if (state.mode === 'tours') return;
   setPins([{ lat, lng, cls: '' }]);
   if (country) return countryCard(country, lat, lng);
@@ -636,7 +669,7 @@ function surfaceClick(lat, lng, country) {
 }
 
 function probeHtml(lat, lng) {
-  const now = new Date(); const el = astro.solarElevation(lat, lng, now);
+  const now = clock.date(); const el = astro.solarElevation(lat, lng, now);
   return `
     <dl>
       <dt>Position</dt><dd>${astro.fmtLat(lat)}, ${astro.fmtLng(lng)}</dd>
@@ -651,6 +684,7 @@ function probeHtml(lat, lng) {
       <a class="btn ghost" href="https://earth.google.com/web/@${lat},${lng},150a,900d,35y,0h,65t,0r" target="_blank" rel="noopener">Google Earth 3D</a>
       <a class="btn ghost" href="https://www.mapillary.com/app/?lat=${lat}&lng=${lng}&z=17" target="_blank" rel="noopener">Mapillary</a>
       <button class="btn ghost" data-fly="${lat},${lng},0.0015">Zoom to street level</button>
+      <button class="btn" data-trace="${lat},${lng}">Trace connections</button>
     </div>
     <div id="probe-photos"></div><div id="probe-cams"></div>`;
 }
@@ -852,7 +886,7 @@ function aboutPanel() {
     <div class="credit"><p><b>Terra Atlas is built on <a href="https://github.com/koala73/worldmonitor" target="_blank" rel="noopener">World Monitor</a> by Elie Habib.</b>
     Its design, 3D-globe concept, layer catalogue and curated datasets come from that project. This fork adds a static, server-free build for GitHub Pages, live public feeds, deep-zoom tiles, tours, a quiz and teaching notes.</p></div>
     <p>Free software under the <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener">GNU AGPL v3.0</a>. You can read, copy and change the source code of this exact site: <a href="${esc(repo)}" target="_blank" rel="noopener">${esc(repo.replace('https://', ''))}</a>.</p>
-    <h4>Keyboard</h4>${rowsHtml([['/', 'Search'], ['R', 'Auto-rotate'], ['1 – 4', 'Normal, night vision, thermal, CRT'], ['L', 'Layers (on small screens)'], ['T · Q · M', 'Tours, quiz, measure'], ['Esc', 'Close panel / leave mode']])}
+    <h4>Keyboard</h4>${rowsHtml([['C', 'Trace connections'], ['S', 'Area scan'], ['[ ]', 'Time machine slower / faster'], ['\\', 'Back to live time'], ['/', 'Search'], ['R', 'Auto-rotate'], ['1 – 4', 'Normal, night vision, thermal, CRT'], ['L', 'Layers (on small screens)'], ['T · Q · M', 'Tours, quiz, measure'], ['Esc', 'Close panel / leave mode']])}
     <h4>Data, libraries and references</h4>
     <ul class="sources">${Object.values(SOURCES).map((s) => `<li><a href="${s.url}" target="_blank" rel="noopener">${esc(s.name)}</a><small>${esc(s.role)} — ${esc(s.license)}</small></li>`).join('')}</ul>`);
 }
@@ -874,7 +908,10 @@ function setMode(mode) {
   else if (state.mode === 'quiz') quizHome();
   else if (state.mode === 'measure') openNotes('Measure', '<h3>Pick two points</h3><p>Click the globe twice to get the great-circle distance, bearing, and how long light takes to cross it in an optical fibre.</p>');
   else if (state.mode === 'about') aboutPanel();
+  else if (state.mode === 'trace') openNotes('Trace', '<h3>Click any place</h3><p>Trace draws how that spot is wired to the world: the nearest internet exchange buildings, the undersea cables that land nearby and every coast they reach, the power stations, the airport, public cameras and radio receivers, and a beam to each satellite overhead — with the light-speed delay of each link.</p><p class="muted">Tip: press C to turn Trace on or off.</p>');
   else closeNotes();
+  if (state.mode !== 'trace') tracer?.clear();
+  $('#globe').style.cursor = ['measure', 'quiz', 'trace'].includes(state.mode) ? 'crosshair' : '';
 }
 function endTourSilently() {
   const { prevOn, prevBase, prevSat } = state.tour; state.tour = null;
@@ -978,7 +1015,12 @@ function onCamera(pov) {
   state.pov = pov;
   nav.tune(pov.altitude);
   if (state.on.has('aircraft') && Math.abs(Math.log(pov.altitude / prevAlt)) > 0.02) layoutPlanes(globe, pov.altitude);
-  if (!onCamera.raf) onCamera.raf = requestAnimationFrame(() => { onCamera.raf = 0; cullSprites(); if (Math.abs(Math.log(state.pov.altitude / zkAlt)) > 0.12) { zkAlt = state.pov.altitude; markers.rescale(zk()); } });
+  if (!onCamera.raf) onCamera.raf = requestAnimationFrame(() => {
+    onCamera.raf = 0;
+    // Zooming: re-seat pins on the ground and resize columns so nothing floats above or behind the camera.
+    if (Math.abs(Math.log(state.pov.altitude / (onCamera.seatAlt ?? 1))) > 0.1) { onCamera.seatAlt = state.pov.altitude; markers.setCamera(state.pov.altitude); markers.reseat(); zkAlt = state.pov.altitude; markers.rescale(zk()); }
+    cullSprites();
+  });
   perf?.moving();
   clearTimeout(onCamera.v); onCamera.v = setTimeout(viewSettled, 280);
   if (!cursor) showReadout(pov.lat, pov.lng);
@@ -1008,7 +1050,7 @@ async function viewSettled() {
 let downAt = null;
 $('#globe').addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; state.clickConsumed = false; }, true);
 $('#globe').addEventListener('pointerup', (e) => {
-  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5 || state.mode === 'measure' || state.mode === 'quiz') return;
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5 || ['measure', 'quiz', 'trace'].includes(state.mode)) return; // these modes want the ground, not the marker
   if (e.target.closest?.('.pinx')) return;
   const rect = $('#globe').getBoundingClientRect(); const x = e.clientX - rect.left; const y = e.clientY - rect.top;
   const hit = pickAt(x, y);
@@ -1076,10 +1118,36 @@ function writeHash() {
 
 // ------------------------------------------------------------------ clock, spin, screenshot, keys
 function tickClock() {
-  const d = new Date(); const s = astro.subsolarPoint(d);
-  $('#clock').innerHTML = `<b>${d.toISOString().slice(11, 19)}</b> UTC · Sun over ${astro.fmtLat(s.lat).replace(/\.\d+/, '')}, ${astro.fmtLng(s.lng).replace(/\.\d+/, '')}`;
+  const d = clock.date(); const s = astro.subsolarPoint(d); const live = clock.isLive();
+  const off = (clock.now() - Date.now()) / 3600_000;
+  $('#clock').innerHTML = `<b>${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 19)}</b> UTC ${live ? '<i class="livepill">LIVE</i>' : `<i class="timepill">${off >= 0 ? '+' : '−'}${Math.abs(off) < 48 ? `${Math.abs(off).toFixed(1)} h` : `${Math.abs(off / 24).toFixed(1)} d`} · ${clock.paused ? 'paused' : speedLabel(clock.speed)}</i>`} · Sun over ${astro.fmtLat(s.lat).replace(/\.\d+/, '')}, ${astro.fmtLng(s.lng).replace(/\.\d+/, '')}`;
+  const sl = $('#time-slider'); if (sl && document.activeElement !== sl) sl.value = String(Math.max(-168, Math.min(48, off)));
+  $('#time-play') && ($('#time-play').textContent = clock.paused ? '▶' : '❚❚');
+  $('#time-speed') && ($('#time-speed').textContent = speedLabel(clock.speed));
+  document.body.classList.toggle('timetravel', !live);
 }
-setInterval(tickClock, 1000); tickClock();
+setInterval(tickClock, 500); tickClock();
+// ---- time machine controls
+function stepSpeed(dir) { const i = SPEEDS.indexOf(clock.speed); const j = Math.max(0, Math.min(SPEEDS.length - 1, (i < 0 ? SPEEDS.indexOf(1) : i) + dir)); clock.setSpeed(SPEEDS[j]); tickClock(); }
+$('#clock').addEventListener('click', () => { $('#timebar').hidden = !$('#timebar').hidden; });
+$('#time-slower').addEventListener('click', () => stepSpeed(-1));
+$('#time-faster').addEventListener('click', () => stepSpeed(1));
+$('#time-play').addEventListener('click', () => { clock.pause(); tickClock(); });
+$('#time-live').addEventListener('click', () => { clock.live(); tickClock(); for (const id of ['sun', 'stations', 'satellites', 'quakes']) refreshLayer(id, { soft: true }); toast('Back to live time'); });
+$('#time-back').addEventListener('click', () => { clock.shift(-3600_000 * 6); tickClock(); });
+$('#time-fwd').addEventListener('click', () => { clock.shift(3600_000 * 6); tickClock(); });
+$('#time-slider').addEventListener('input', (e) => { clock.set(Date.now() + Number(e.target.value) * 3600_000); tickClock(); });
+$('#time-replay').addEventListener('click', () => replayQuakes());
+function replayQuakes() {
+  state.opts.quakes.feed = '2.5_week'; delete state.data.quakes; if (!state.on.has('quakes')) toggleLayer('quakes', true); else refreshLayer('quakes');
+  clock.set(Date.now() - 7 * 86_400_000); clock.setSpeed(3600); $('#timebar').hidden = false; tickClock();
+  globe.pointOfView({ lat: 5, lng: 150, altitude: 2.4 }, reduceMotion ? 0 : 1500);
+  toast('Replaying the last 7 days of earthquakes at one hour per second — watch the Ring of Fire light up');
+}
+document.addEventListener('keydown', (e) => {
+  if (e.target.matches('input, select, textarea')) return;
+  if (e.key === '[') stepSpeed(-1); if (e.key === ']') stepSpeed(1); if (e.key === '\\') { clock.live(); tickClock(); }
+});
 $('#spin').addEventListener('click', toggleSpin);
 function toggleSpin() { controls.autoRotate = !controls.autoRotate; $('#spin').setAttribute('aria-pressed', String(controls.autoRotate)); }
 $('#shot').addEventListener('click', () => {
@@ -1097,6 +1165,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 't' || e.key === 'T') setMode('tours');
   else if (e.key === 'q' || e.key === 'Q') setMode('quiz');
   else if (e.key === 'm' || e.key === 'M') setMode('measure');
+  else if (e.key === 'c' || e.key === 'C') setMode('trace');
   else if (e.key === 'Escape') { if (state.tour) endTour(); else if (state.mode) setMode(null); else closeNotes(); }
 });
 
@@ -1110,13 +1179,13 @@ function setLook(look) {
 }
 document.querySelectorAll('[data-look]').forEach((b) => b.addEventListener('click', () => setLook(b.dataset.look)));
 document.addEventListener('keydown', (e) => { if (!e.target.matches('input, select, textarea') && /^[1-5]$/.test(e.key)) setLook(LOOKS[Number(e.key) - 1]); });
-let hud = null;
+let hud = null; let tracer = null;
 $('#gibs-date-input').max = new Date(Date.now() - 24 * 3600_000).toISOString().slice(0, 10);
 $('#gibs-date-input').value = gibsDate();
 $('#gibs-date-input').addEventListener('change', (e) => { state.gibsDate = e.target.value || null; applyBase(); });
 
 // ------------------------------------------------------------------ plug-in layers (flights, cameras, places)
-const api = { LAYERS, pulse: (a, b, c) => pulse(a, b, c), globe, state, esc, $, reduceMotion, openNotes, isOpen, refreshLayer, fly, followTo, setBase, wmo: (c) => WMO[c] ?? '—', select, toast: (m) => toast(m), toggleLayer: (id, on) => toggleLayer(id, on), openWall: () => openWall(api) };
+const api = { now: () => clock.date(), view: () => viewOf(state.pov), particleBudget: () => ({ High: 6000, Balanced: 3500, Fast: 1500 }[perf.q.label] ?? 4000), clearTool: () => clearTool(), setPins: (p) => setPins(p), compose: () => { compose.forceMarkers = true; compose(); }, closeNotes: () => closeNotes(), LAYERS, pulse: (a, b, c) => pulse(a, b, c), globe, state, esc, $, reduceMotion, openNotes, isOpen, refreshLayer, fly, followTo, setBase, wmo: (c) => WMO[c] ?? '—', select, toast: (m) => toast(m), toggleLayer: (id, on) => toggleLayer(id, on), openWall: () => openWall(api) };
 {
   const add = (layer, afterId) => { const i = LAYERS.findIndex((l) => l.id === afterId); LAYERS.splice(i + 1, 0, layer); layerById[layer.id] = layer; };
   add(flightsLayer(api), 'events');
@@ -1125,13 +1194,14 @@ const api = { LAYERS, pulse: (a, b, c) => pulse(a, b, c), globe, state, esc, $, 
   add(newsLayer, 'aircraft'); add(crimeLayer, 'alpr');
   add(shipsLayer, 'news'); add(radioLayer, 'alpr'); add(overlayLayer(api), 'satellites');
   add(internetLayer, 'cables'); add(powerLayer, 'nuclear');
+  add(launchesLayer, 'stations'); add(alertsLayer, 'events'); add(windLayer(api), 'grid');
   crimeLayer.group = 'civic';
   for (const id of ['aircraft', 'news', 'cameras', 'alpr', 'crime', 'cities', 'airports']) layerById[id].fresh = true;
   layerById.aircraft.on = true; layerById.cameras.on = true;
   GROUPS.splice(1, 0, { id: 'cams', label: 'Cameras' });
   GROUPS.splice(3, 0, { id: 'places', label: 'Places' });
   GROUPS.splice(2, 0, { id: 'civic', label: 'Civic data' });
-  for (const l of [layerById.aircraft, layerById.cameras, layerById.alpr, layerById.cities, layerById.airports, layerById.news, layerById.crime, layerById.ships, layerById.radio, layerById.overlay, layerById.internet, layerById.power]) {
+  for (const l of [layerById.aircraft, layerById.cameras, layerById.alpr, layerById.cities, layerById.airports, layerById.news, layerById.crime, layerById.ships, layerById.radio, layerById.overlay, layerById.internet, layerById.power, layerById.launches, layerById.alerts, layerById.wind]) {
     state.opts[l.id] = Object.fromEntries((l.options ?? []).map((o) => [o.id, structuredClone(o.value)]));
     if (l.on && (NEW_VERSION || !location.hash.includes('&l='))) state.on.add(l.id);
   }
@@ -1155,13 +1225,26 @@ for (const id of state.on) refreshLayer(id);
 $('#apply-now').addEventListener('click', applyPending);
 $('#apply-undo').addEventListener('click', () => { state.pending.clear(); renderLayerPanel(); });
 const live = installLive(api);
+tracer = installTrace(api);
+// Live countdowns in any open card
+setInterval(() => document.querySelectorAll('.countdown[data-net]').forEach((el) => { el.textContent = countdown(Number(el.dataset.net) - Date.now()); }), 1000);
 perf = installPerformance({ globe, $, toast: (m) => toast(m), onChange: () => { compose.forceMarkers = true; scheduleCompose(); } });
 hud = installHud(api);
 if (state.look === 'hud') hud.show(true);
 if (NEW_VERSION) { setTimeout(whatsNew, 600); try { localStorage.setItem('terra-atlas-version', VERSION); } catch { /* private mode */ } }
 else if (!location.hash.includes('@') && !isMobile) welcome();
 function whatsNew() {
-  openNotes(`What’s new in v${VERSION}`, `<h3>Faster, smoother, more detail</h3>
+  openNotes(`What’s new in v${VERSION}`, `<h3>Time and connections</h3>
+    <p class="sub">Click the clock at the bottom for the time machine, press C to trace any place, and look for these:</p>
+    <div class="starts">
+      <button class="tour-card" data-start="replay"><b>⏱ Replay a week of earthquakes</b><span>The time machine runs the planet at one hour per second — the Sun, satellites and the ISS move with it.</span></button>
+      <button class="tour-card" data-start="trace"><b>⌁ Trace how a place is connected</b><span>Internet exchanges, undersea cables to every coast they reach, power, airport, cameras, and beams to the satellites overhead.</span></button>
+      <button class="tour-card" data-start="launches"><b>🚀 Rocket launches</b><span>The next 25 launches worldwide with countdowns and live webcasts.</span></button>
+      <button class="tour-card" data-start="wind"><b>≋ Wind and temperature now</b><span>Thousands of streaks drifting with the real wind over a temperature map.</span></button>
+      <button class="tour-card" data-start="alerts"><b>⚠ Disaster alerts</b><span>United Nations–EU GDACS orange and red alerts.</span></button>
+    </div>
+    <p class="muted">Pins now sit on the ground and stay clickable all the way down to street level, and the one you clicked stays pinned.</p>
+    <h4>From v1.5 — faster, smoother, more detail</h4>
     <p class="sub">v1.5 rebuilds how markers are drawn: one draw call for every column, pins and names as cached sprites, map-style decluttering with “+N” cluster badges, label cards on the nearest pins, hover cards everywhere, work split into small slices so the page never freezes, and an automatic quality governor (bottom right, with a live frame-rate meter).</p>
     <h4>From v1.4 — the connected planet</h4>
     <p class="sub">v1.4 added the Overwatch HUD, NASA satellite overlays, power plants, internet buildings, live radio receivers and ships.</p>
@@ -1187,6 +1270,11 @@ document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-start]'); if (!b) return;
   const k = b.dataset.start;
   const setLayers = (ids) => { state.pending.clear(); for (const l of LAYERS) if (ids.includes(l.id) !== state.on.has(l.id)) state.pending.set(l.id, ids.includes(l.id)); applyPending(); };
+  if (k === 'replay') replayQuakes();
+  if (k === 'trace') { setMode('trace'); tracer.trace(33.74, -118.29); }
+  if (k === 'launches') { setLayers(['sun', 'borders', 'cities', 'launches', 'stations']); globe.pointOfView({ lat: 28, lng: -60, altitude: 2.2 }, 1800); showLearn('launches'); }
+  if (k === 'wind') { setLayers(['sun', 'borders', 'cities', 'wind']); globe.pointOfView({ lat: 20, lng: -40, altitude: 2.3 }, 1800); showLearn('wind'); }
+  if (k === 'alerts') { setLayers(['sun', 'borders', 'cities', 'alerts', 'quakes']); globe.pointOfView({ lat: 15, lng: 100, altitude: 2.3 }, 1800); showLearn('alerts'); }
   if (k === 'hud') { setLook('hud'); globe.pointOfView({ lat: 34.05, lng: -118.25, altitude: 0.12 }, 1800); setTimeout(() => hud.scan(), 2400); }
   if (k === 'rain') { state.opts.overlay.kind = 'rain'; delete state.data.overlay; setLayers(['sun', 'borders', 'cities', 'overlay']); globe.pointOfView({ lat: 10, lng: 110, altitude: 2.4 }, 1800); showLearn('overlay'); }
   if (k === 'connected') { preset(0); globe.pointOfView({ lat: 45, lng: 5, altitude: 1.4 }, 1800); }
@@ -1217,4 +1305,4 @@ if (window.__TAURI_INTERNALS__) {
     if (a && new URL(a.href).origin !== location.origin) { e.preventDefault(); window.__TAURI_INTERNALS__.invoke('plugin:opener|open_url', { url: a.href }); }
   });
 }
-window.terraAtlas = { pickAt: (x, y) => pickAt(x, y), live, applyPending, preset, VERSION, globe, state, setBase, toggleLayer, startTour, setMode, select, showLearn, surfaceClick, countryAt, setLook, refreshLayer, flightState }; // for tinkering in the console
+window.terraAtlas = { tracer: () => tracer, markers, pickAt: (x, y) => pickAt(x, y), live, applyPending, preset, VERSION, globe, state, setBase, toggleLayer, startTour, setMode, select, showLearn, surfaceClick, countryAt, setLook, refreshLayer, flightState }; // for tinkering in the console

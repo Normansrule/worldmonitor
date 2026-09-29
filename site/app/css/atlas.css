@@ -329,3 +329,29 @@ body.hud-on .notes.open ~ #hud .hud-tr, .notes.open ~ #hud .hud-tr { right: 396p
 .quality { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--mist); padding: 0 4px; }
 .quality select { background: var(--chart); border: 1px solid var(--rule); border-radius: 6px; padding: 2px 4px; font-size: 12px; }
 #fps { font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }
+
+/* ---------- v1.6: time machine ---------- */
+button.clock { cursor: pointer; font: inherit; color: var(--mist); }
+button.clock:hover { border-color: var(--mist); }
+.livepill, .timepill { font-style: normal; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 7px; margin-left: 4px; }
+.livepill { background: var(--coral); color: #fff; }
+.timepill { background: var(--brass); color: var(--abyss); }
+.timebar { position: fixed; left: 50%; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 6; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; background: var(--chart-a); border: 1px solid var(--brass); border-radius: 14px; padding: 8px 12px; backdrop-filter: blur(10px); max-width: calc(100vw - 24px); }
+.timebar[hidden] { display: none; }
+.timebar b { font: 700 14px/1 var(--display); color: var(--brass); margin-right: 4px; }
+.timebar button { background: var(--chart); border: 1px solid var(--rule); color: var(--paper); border-radius: 8px; padding: 5px 9px; cursor: pointer; font-size: 13px; }
+.timebar button:hover { border-color: var(--mist); }
+.timebar .golive { color: var(--coral); border-color: var(--coral); font-weight: 700; }
+#time-speed { min-width: 84px; text-align: center; font-size: 13px; color: var(--paper); font-variant-numeric: tabular-nums; }
+.tslider { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--mist); }
+.tslider input { width: 220px; accent-color: var(--brass); }
+body.timetravel #globe { box-shadow: inset 0 0 0 3px rgba(227, 181, 91, 0.55); }
+@media (max-width: 860px) { .timebar { bottom: 190px; } .tslider input { width: 130px; } }
+
+.countdown { font: 700 30px/1.1 var(--display); color: #ff9e5e; font-variant-numeric: tabular-nums; margin: 6px 0 10px; }
+.trace-list { list-style: none; padding: 0; margin: 6px 0; }
+.trace-list li { border-left: 3px solid var(--c); margin: 4px 0; padding-left: 8px; }
+.trace-list button { background: none; border: 0; color: var(--paper); text-align: left; cursor: pointer; padding: 3px 0; font: inherit; display: block; width: 100%; }
+.trace-list button:hover b { color: var(--c); }
+.trace-list b { display: block; font-size: 14px; }
+.trace-list small { color: var(--mist); font-size: 12.5px; }

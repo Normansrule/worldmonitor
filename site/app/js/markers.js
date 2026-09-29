@@ -73,7 +73,7 @@ function cachedTexture(key, draw) {
 const FONT = '"Atkinson Hyperlegible","Segoe UI",Arial,sans-serif';
 const S = 2; // draw at 2× for crisp text
 
-function drawPin(cv, { icon, color, title, sub, detailed, more }) {
+function drawPin(cv, { icon, color, title, sub, detailed, more, selected }) {
   const ctx = cv.getContext('2d');
   ctx.font = `700 ${13 * S}px ${FONT}`;
   const tw = detailed ? Math.min(230 * S, ctx.measureText(title).width) : 0;
@@ -95,7 +95,7 @@ function drawPin(cv, { icon, color, title, sub, detailed, more }) {
   g.beginPath(); g.moveTo(cx - r * 0.55, cy + r * 0.8); g.lineTo(cx, h - 1 * S); g.lineTo(cx + r * 0.55, cy + r * 0.8); g.closePath();
   g.fillStyle = color; g.fill();
   g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fillStyle = color; g.fill();
-  g.lineWidth = 2 * S; g.strokeStyle = 'rgba(8,24,39,0.85)'; g.stroke();
+  g.lineWidth = (selected ? 3.5 : 2) * S; g.strokeStyle = selected ? '#ffffff' : 'rgba(8,24,39,0.85)'; g.stroke();
   const img = iconImgs[icon] ?? iconImgs.pin;
   if (img) g.drawImage(img, cx - 9 * S, cy - 9 * S, 18 * S, 18 * S);
   if (more) { // cluster badge
@@ -150,6 +150,10 @@ export class MarkerRenderer {
   }
 
   /** Columns: [{lat,lng,alt,r,color}], zk = zoom factor for radii. Positions/rotations cached; only scale changes on zoom. */
+  /** How tall columns and how high pins float, relative to the camera height (globe radii).
+      Far away they stand tall so you can read them; up close they shrink to the ground so they
+      never end up above or behind the camera. */
+  setCamera(camAlt) { this.camAlt = camAlt; this.hScale = Math.max(0.004, Math.min(1, camAlt / 0.8)); this.floatAlt = Math.max(0.0000012, Math.min(0.004, camAlt * 0.015)); }
   setPoints(points, zk) {
     const n = Math.min(points.length, this.cap);
     this.points = points; this.base = new Float32Array(n * 7);
@@ -162,7 +166,7 @@ export class MarkerRenderer {
       this.cols.setColorAt(i, parseColor(pt.color));
     }
     this.cols.count = n;
-    if (this.cols.instanceColor) this.cols.instanceColor.needsUpdate = true;
+    if (this.cols.instanceColor) { const a = this.cols.instanceColor; a.clearUpdateRanges?.(); a.addUpdateRange?.(0, Math.max(3, n * 3)); a.needsUpdate = true; }
     this.rescale(zk);
   }
   rescale(zk) {
@@ -170,11 +174,13 @@ export class MarkerRenderer {
     for (let i = 0; i < n; i++) {
       const pt = this.points[i];
       const rw = Math.max(0.0004, (pt.r ?? 0.2) * zk * D2R * R);
-      const hw = Math.max(0.0005, (pt.alt ?? 0.01) * R);
+      const hw = Math.max(0.00004, (pt.alt ?? 0.01) * R * (this.hScale ?? 1));
       this.p.set(b[i * 7], b[i * 7 + 1], b[i * 7 + 2]); this.q.set(b[i * 7 + 3], b[i * 7 + 4], b[i * 7 + 5], b[i * 7 + 6]); this.s.set(rw, rw, hw);
       this.m.compose(this.p, this.q, this.s); this.cols.setMatrixAt(i, this.m);
     }
-    this.cols.instanceMatrix.needsUpdate = true;
+    // Upload only the slots in use — the buffer has room for 60,000 markers, and re-sending all of it
+    // (3.8 MB) on every zoom step was the biggest remaining stall.
+    const im = this.cols.instanceMatrix; im.clearUpdateRanges?.(); im.addUpdateRange?.(0, Math.max(16, n * 16)); im.needsUpdate = true;
   }
 
   /** Sprites: pins [{lat,lng,alt,icon,color,title,sub,detailed,ref}] and labels [{lat,lng,alt,text,size,color,ref}] */
@@ -187,7 +193,7 @@ export class MarkerRenderer {
     }
     let k = 0;
     for (const p of pins) {
-      const key = `p|${p.icon}|${p.color}|${p.more ?? 0}|${p.detailed ? `${p.title}|${p.sub}` : ''}`;
+      const key = `p|${p.icon}|${p.color}|${p.more ?? 0}|${p.selected ? 1 : 0}|${p.detailed ? `${p.title}|${p.sub}` : ''}`;
       const t = cachedTexture(key, (cv) => drawPin(cv, p));
       this.place(this.pool[k++], p, t, 0);
     }
@@ -196,14 +202,20 @@ export class MarkerRenderer {
       const t = cachedTexture(key, (cv) => drawLabel(cv, l));
       this.place(this.pool[k++], l, t, 0.5);
     }
+    for (let i = 0; i < this.pool.length; i++) this.pool[i].userData.want = i < k;
     for (let i = k; i < this.pool.length; i++) this.pool[i].visible = false;
   }
+  /** Pins stand on the ground (plus a hair, scaled to the zoom) so they stay put under your cursor at every zoom. */
+  spriteAlt(d) { const f = this.floatAlt ?? 0.004; return d.pinned === false ? Math.max(f, Math.min(d.alt ?? f, 0.004 * (this.hScale ?? 1))) : f; }
   place(sp, d, t, anchorY) {
-    const c = this.globe.getCoords(d.lat, d.lng, d.alt ?? 0.004);
+    const alt = this.spriteAlt(d); d.renderAlt = alt;
+    const c = this.globe.getCoords(d.lat, d.lng, alt);
     sp.position.set(c.x, c.y, c.z); sp.material.map = t.tex; sp.material.needsUpdate = true; sp.visible = true;
     sp.center.set(t.anchorX, anchorY); sp.userData = { d, t, anchorY };
     sp.scale.set((t.w / S) * this.pixelScale, (t.h / S) * this.pixelScale, 1);
   }
+  /** Re-seat every visible sprite for a new zoom level (cheap: positions only). */
+  reseat() { for (const sp of this.pool) if (sp.visible || sp.userData.want) { const d = sp.userData.d; if (!d) continue; const alt = this.spriteAlt(d); d.renderAlt = alt; const c = this.globe.getCoords(d.lat, d.lng, alt); sp.position.set(c.x, c.y, c.z); } }
   layoutSprites() { for (const sp of this.pool) if (sp.visible && sp.userData.t) sp.scale.set((sp.userData.t.w / S) * this.pixelScale, (sp.userData.t.h / S) * this.pixelScale, 1); }
 
   /** Screen-space hit test on visible pins (they stick up above their anchor). */
@@ -211,7 +223,7 @@ export class MarkerRenderer {
     let best = null;
     for (const sp of this.pool) {
       if (!sp.visible || !sp.userData.d || sp.userData.anchorY !== 0) continue;
-      const d = sp.userData.d; const s = this.globe.getScreenCoords(d.lat, d.lng, d.alt ?? 0.004); if (!s) continue;
+      const d = sp.userData.d; const s = this.globe.getScreenCoords(d.lat, d.lng, d.renderAlt ?? 0.004); if (!s) continue;
       if (occluded(d)) continue;
       const w = sp.userData.t.w / S; const h = sp.userData.t.h / S; const left = s.x - w * sp.center.x;
       if (x >= left && x <= left + w && y >= s.y - h && y <= s.y) { if (!best || s.y > best.y) best = { d, y: s.y }; }

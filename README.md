@@ -23,6 +23,31 @@ Built on [World Monitor](https://github.com/koala73/worldmonitor) by Elie Habib.
 
 ---
 
+## ⏱ New in v1.6 — time and connections
+
+| | |
+|---|---|
+| **Time machine** | Click the clock (or press `[` `]`) to run the planet from −1 h/s to +6 h/s, pause it, or drag up to 7 days back. The Sun, the day/night line, satellites, space stations and the ISS ground track all follow the clock; **Replay quakes** plays the last week of earthquakes in order at one hour per second. `\` returns to live time. |
+| **Trace (press C)** | Click any spot to draw how it is wired to the world: the nearest internet exchange buildings and the busiest regional hub, the undersea-cable landing and every coast those cables reach, power stations within 150 km by fuel, the nearest airport, public cameras and radio receivers, and a beam to every tracked satellite above the horizon — each with its light-speed delay. |
+| **Rocket launches** | The next 25 orbital launches from The Space Devs’ Launch Library 2 at their pads, with live countdowns, mission and orbit, launch-weather odds, and webcast links; pads with a launch in the next 24 hours pulse and live webcasts show red. “Why launch from here?” works out the pad’s free speed from Earth’s spin. |
+| **Wind and temperature now** | Thousands of streaks drifting with the current 10 m wind over a 2 m temperature map. The grid is fetched from Open-Meteo every 6 hours during the Pages deploy (never committed); the motion is computed in the browser every frame. |
+| **Disaster alerts** | Orange and red GDACS alerts (UN OCHA and European Commission) for earthquakes, cyclones, floods, volcanoes, wildfires and droughts; red alerts pulse and join the Live ticker. |
+| **Pins at every zoom** | Pins now stand on the ground and are re-seated as you zoom, so they stay under the cursor and clickable all the way down to street level (previously they floated ~30 km up and vanished behind the camera). Columns shrink with zoom, the item you clicked stays pinned, and cluster badges replace hidden columns up close. |
+
+
+<table>
+<tr>
+<td width="50%"><img src="site/docs-media/app-trace.jpg" alt="Trace mode over London: arcs to internet exchanges, cable landings, power stations and beams to satellites overhead" /><br/><b>Trace</b> — how London is wired to the world.</td>
+<td width="50%"><img src="site/docs-media/app-wind.jpg" alt="Wind streaks drifting over a temperature map of the Atlantic" /><br/><b>Wind and temperature now</b>.</td>
+</tr>
+<tr>
+<td><img src="site/docs-media/app-launches.jpg" alt="Upcoming rocket launch card with countdown and the Why launch from here explanation" /><br/><b>Rocket launches</b> with live countdowns and webcasts.</td>
+<td><img src="site/docs-media/app-maxzoom.jpg" alt="Camera pins on a Los Angeles freeway at maximum zoom" /><br/><b>Pins at maximum zoom</b> — still on the street and clickable.</td>
+</tr>
+</table>
+
+---
+
 ## ⚡ New in v1.5 — fast and detailed
 
 | | |
@@ -148,7 +173,7 @@ flowchart LR
 - **Click anything.** Points, lines and areas open field notes. Bare ground opens a point probe (weather, elevation, local solar time, Sun elevation, nearest plate boundary). A country opens its fact card.
 - **Search** across 1,000+ features — cables, ports, data centres, countries, tours, layers — or press Enter to search the whole world with OpenStreetMap.
 - **Share a view.** The address bar always holds your camera, base map and layers, e.g. `app/#@26.5,56.3,0.35&b=imagery&l=waterways,routes`.
-- **Keyboard:** `S` area scan · `5` HUD · `/` search · arrows pan · `+`/`−` zoom · double-click zoom in · `R` spin · `1–4` sensor looks · `T` tours · `Q` quiz · `M` measure · `Esc` close.
+- **Keyboard:** `C` trace · `[` `]` time speed · `\` live time · `S` area scan · `5` HUD · `/` search · arrows pan · `+`/`−` zoom · double-click zoom in · `R` spin · `1–4` sensor looks · `T` tours · `Q` quiz · `M` measure · `Esc` close.
 
 ---
 
@@ -164,6 +189,7 @@ flowchart LR
 | | Licence-plate readers (Flock and others) — 150,000+ mapped; density grid when zoomed out | OpenStreetMap / DeFlock · Overpass | weekly + on demand |
 | Places | City names (zoom-dependent) · Airports | Natural Earth · OurAirports | static |
 | Live Earth | News pins by topic | GDELT GEO 2.0 | 15 min |
+| Live Earth | Rocket launches · Disaster alerts (GDACS) · Wind and temperature | Launch Library 2 · GDACS · Open-Meteo | 30 min · 20 min · 6 h |
 | Connected planet | Power plants · Internet exchanges & data centres · Live radio receivers · Live ships (Baltic) · NASA overlays | WRI · PeeringDB · KiwiSDR · Fintraffic Digitraffic · NASA GIBS | static / daily / 1 min / 30 min |
 | Civic data | Reported crime (hexagon density + pins) | Chicago · DataSF · NYC Open Data · LA City · data.police.uk | on view |
 | Sky and space | Day and night (terminator, subsolar point) | computed | 1 min |
@@ -182,7 +208,7 @@ flowchart LR
 <table><tr>
 <td width="55%">
 
-**Thirteen lessons** on the [Learn page](https://normansrule.github.io/worldmonitor/learn/), each with the key equation, its sources and a button that opens the idea on the globe:
+**Fifteen lessons** on the [Learn page](https://normansrule.github.io/worldmonitor/learn/), each with the key equation, its sources and a button that opens the idea on the globe:
 
 1. Plate tectonics and earthquakes — `E₂/E₁ = 10^(1.5·ΔM)`
 2. Orbits — Kepler’s third law, `T = 2π√(a³/μ)`
@@ -197,6 +223,8 @@ flowchart LR
 11. Cameras, maps and privacy
 12. Reading crime data responsibly
 13. How the internet is wired
+14. Why rockets launch east, from the coast
+15. The planet’s wind machine
 
 </td>
 <td>
@@ -345,7 +373,7 @@ tools/                      data export, camera + ALPR fetchers, setup, screensh
 | [hls.js](https://github.com/video-dev/hls.js) · Apache-2.0 | Live camera video |
 | [Tauri](https://github.com/tauri-apps/tauri) · MIT/Apache-2.0 | Desktop app |
 
-Data: WRI Global Power Plant Database (CC BY 4.0) · PeeringDB · KiwiSDR receiver owners · Fintraffic / digitraffic.fi (CC BY 4.0) · GDELT Project · City of Chicago · DataSF · NYC Open Data · City of Los Angeles · data.police.uk (OGL v3) · Caltrans · NYC DOT · Transport for London (OGL) · Hong Kong Transport Department · 511 Ontario · 511 Alberta · © OpenStreetMap contributors via DeFlock and Overpass · OpenSky Network · airplanes.live · adsbdb (routes looked up live, not stored) · OurAirports · Natural Earth · Panoramax (CC BY-SA) · USGS · NASA EONET · NASA GIBS (*we acknowledge the use of imagery provided by services from NASA’s Global Imagery Browse Services (GIBS), part of NASA’s Earth Science Data and Information System (ESDIS)*) · NOAA SWPC · CelesTrak · adsb.lol (ODbL) · OpenSky Network · Open-Meteo (CC BY 4.0) · REST Countries · World Bank (CC BY 4.0) · Wikipedia (CC BY-SA) · © OpenStreetMap contributors (ODbL) · Esri World Imagery · PB2002 plate boundaries (ODC-BY) · NASA Blue Marble and Black Marble. Full list with licences: [`docs/REFERENCES.md`](docs/REFERENCES.md).
+Data: The Space Devs Launch Library 2 · GDACS · Open-Meteo (CC BY 4.0) · WRI Global Power Plant Database (CC BY 4.0) · PeeringDB · KiwiSDR receiver owners · Fintraffic / digitraffic.fi (CC BY 4.0) · GDELT Project · City of Chicago · DataSF · NYC Open Data · City of Los Angeles · data.police.uk (OGL v3) · Caltrans · NYC DOT · Transport for London (OGL) · Hong Kong Transport Department · 511 Ontario · 511 Alberta · © OpenStreetMap contributors via DeFlock and Overpass · OpenSky Network · airplanes.live · adsbdb (routes looked up live, not stored) · OurAirports · Natural Earth · Panoramax (CC BY-SA) · USGS · NASA EONET · NASA GIBS (*we acknowledge the use of imagery provided by services from NASA’s Global Imagery Browse Services (GIBS), part of NASA’s Earth Science Data and Information System (ESDIS)*) · NOAA SWPC · CelesTrak · adsb.lol (ODbL) · OpenSky Network · Open-Meteo (CC BY 4.0) · REST Countries · World Bank (CC BY 4.0) · Wikipedia (CC BY-SA) · © OpenStreetMap contributors (ODbL) · Esri World Imagery · PB2002 plate boundaries (ODC-BY) · NASA Blue Marble and Black Marble. Full list with licences: [`docs/REFERENCES.md`](docs/REFERENCES.md).
 
 ## 📄 License
 

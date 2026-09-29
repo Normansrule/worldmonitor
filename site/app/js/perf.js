@@ -49,3 +49,29 @@ export function installPerformance({ globe, $, toast, onChange }) {
   apply(false);
   return api;
 }
+
+/**
+ * Program keeper. globe.gl rebuilds paths, arcs and rings (with brand-new materials) whenever their
+ * data or widths change — and when the last material of a kind is disposed, WebGL frees its compiled
+ * shader, so the next zoom recompiles it (seconds on slow GPUs). We keep one tiny invisible copy of
+ * each shader variant alive, so every variant is compiled exactly once per visit.
+ */
+export function installProgramKeeper(globe) {
+  const renderer = globe.renderer(); const scene = globe.scene();
+  const kept = new Map(); let pending = false;
+  function sweep() {
+    pending = false;
+    scene.traverse((o) => {
+      if (o.userData?.keeper || !o.material || Array.isArray(o.material) || !o.geometry || o.isSprite) return;
+      const prog = renderer.properties.get(o.material)?.currentProgram; if (!prog || kept.has(prog.cacheKey)) return;
+      try {
+        const k = new o.constructor(o.geometry.clone(), o.material.clone());
+        k.userData.keeper = true; k.frustumCulled = false; k.renderOrder = -1000; k.raycast = () => {};
+        k.scale.setScalar(1e-4); // a speck at the Earth's centre: always hidden behind the globe, never seen
+        if (k.count !== undefined && o.count !== undefined) k.count = Math.min(1, o.count);
+        scene.add(k); kept.set(prog.cacheKey, k);
+      } catch { kept.set(prog.cacheKey, null); }
+    });
+  }
+  return { schedule() { if (!pending) { pending = true; setTimeout(sweep, 1500); } }, size: () => kept.size };
+}

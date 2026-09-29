@@ -106,7 +106,9 @@ export function layoutPlanes(globe, camAlt, list = lastList) {
     tmp.c.set(sel ? '#f07a63' : EMERGENCY.has(a.squawk) ? '#ff3b30' : altColor(a.altFt, a.ground)); m.setColorAt(i, tmp.c);
     a._alt = alt; i += 1;
   }
-  m.count = i; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  m.count = i;
+  const im = m.instanceMatrix; im.clearUpdateRanges?.(); im.addUpdateRange?.(0, Math.max(16, i * 16)); im.needsUpdate = true;
+  if (m.instanceColor) { const c = m.instanceColor; c.clearUpdateRanges?.(); c.addUpdateRange?.(0, Math.max(3, i * 3)); c.needsUpdate = true; }
 }
 
 // --------------------------------------------------------------- enrichment (adsbdb)

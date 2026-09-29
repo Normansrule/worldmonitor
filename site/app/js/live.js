@@ -27,6 +27,8 @@ export function installLive(api) {
     for (const a of state.data.aircraft?.ac ?? []) if (SQUAWK[a.squawk]) out.push({ id: `sq-${a.id}`, t: Date.now(), kind: 'Aircraft squawking', icon: '✈', color: '#f07a63', title: `${a.call || a.id} — ${SQUAWK[a.squawk]} (${a.squawk})`, lat: a.lat, lng: a.lng, weight: 100, ref: { layer: 'aircraft', d: { ...a, src: state.data.aircraft.src } } });
     const kp = state.data.aurora?.kp; const last = Array.isArray(kp) ? kp.at(-1) : null; const kpv = last ? Number(Array.isArray(last) ? last[1] : last.Kp ?? last.kp_index) : 0;
     if (kpv >= 5) out.push({ id: 'kp', t: Date.now(), kind: 'Geomagnetic storm', icon: '✺', color: '#7ef0a0', title: `Kp ${kpv} — aurora possible far from the poles`, lat: 65, lng: -100, weight: 90, ref: null });
+    for (const l of state.data.launches ?? []) if (l.net > Date.now() - 2 * 3600_000 && l.net < Date.now() + 48 * 3600_000) out.push({ id: `l-${l.id}`, t: l.net, kind: l.live ? 'Launch — live now' : 'Rocket launch', icon: '🚀', color: '#ff9e5e', title: `${l.name} from ${l.site}`, lat: l.lat, lng: l.lng, weight: l.live ? 120 : 60, ref: { layer: 'launches', d: l } });
+    for (const a of state.data.alerts ?? []) if (a.level === 'Red') out.push({ id: `g-${a.id}`, t: a.from ? Date.parse(`${a.from}Z`) : Date.now(), kind: 'Red disaster alert', icon: '⚠', color: '#ff3b30', title: `${a.name}${a.sev ? ` — ${a.sev}` : ''}`, lat: a.lat, lng: a.lng, weight: 110, ref: { layer: 'alerts', d: a } });
     items = out.filter((i) => Number.isFinite(i.lat)).sort((a, b) => b.t - a.t).slice(0, 120);
     render();
   }

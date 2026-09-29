@@ -20,6 +20,7 @@ licence (see [`LICENSE`](LICENSE)). As required by section 5 of the AGPL, this f
 | 2026-09 | v1.3: live ticker, feed and live tour; GDELT news pins; official crime-report layer; camera wall; Apply button and presets; layer counts; flight emergencies; fixes for shared-object removal and stale address-bar layer lists. |
 | 2026-09 | v1.4: Overwatch HUD and area scan, NASA GIBS overlays, power plants (WRI), internet facilities (PeeringDB) and KiwiSDR receivers (`tools/fetch-networks.mjs`), Baltic ships and Finnish cameras (Digitraffic), satellite footprints. |
 | 2026-09 | v1.5: fast marker renderer (instanced columns, sprite pins and names, grid-index picking), decluttering and cluster badges, hover cards, time-sliced updates, shader pre-compilation, quality governor. |
+| 2026-09 | v1.6: time machine (`clock.js`), Trace connections, rocket launches and GDACS alerts (`launches.js`), wind and temperature (`wind.js`, `tools/fetch-weather.mjs` in the Pages deploy), ground-anchored pins at every zoom. |
 
 Nothing under `src/`, `server/`, `api/`, `shared/` or other upstream directories has been changed.
 "World Monitor" is the original author's project name; Terra Atlas does not use it as its own brand.

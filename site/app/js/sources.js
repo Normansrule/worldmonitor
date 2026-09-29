@@ -47,6 +47,8 @@ export const SOURCES = {
   peeringdb: { name: 'PeeringDB', url: 'https://www.peeringdb.com', license: 'PeeringDB Acceptable Use Policy (public data)', role: 'Colocation facilities and internet exchanges.' },
   kiwisdr: { name: 'KiwiSDR public receiver directory (rx.linkfanel.net / kiwisdr.com)', url: 'http://rx.linkfanel.net', license: 'Community directory; receivers run by volunteers', role: 'Live shortwave receivers you can listen to.' },
   digitraffic: { name: 'Fintraffic Digitraffic (marine AIS and road weather cameras)', url: 'https://www.digitraffic.fi/en/', license: 'CC BY 4.0 — Fintraffic / digitraffic.fi', role: 'Live ships in the Baltic and Finnish road cameras.' },
+  ll2: { name: 'The Space Devs — Launch Library 2', url: 'https://thespacedevs.com/llapi', license: 'Free API (15 requests/hour anonymous); community data', role: 'Upcoming and recent rocket launches, pads and webcasts.' },
+  gdacs: { name: 'GDACS — Global Disaster Alert and Coordination System (UN OCHA and European Commission JRC)', url: 'https://www.gdacs.org', license: 'Free public alerts; cite GDACS', role: 'Orange and red disaster alerts.' },
   openmeteo: { name: 'Open-Meteo forecast & elevation APIs', url: 'https://open-meteo.com', license: 'CC BY 4.0', role: 'Weather and ground elevation for any clicked point.' },
   restcountries: { name: 'REST Countries', url: 'https://restcountries.com', license: 'MPL-2.0', role: 'Capital, population, languages, currencies for the country card.' },
   worldbank: { name: 'World Bank Open Data API', url: 'https://datahelpdesk.worldbank.org/knowledgebase/articles/889392', license: 'CC BY 4.0', role: 'GDP, life expectancy, internet use and renewable share indicators.' },

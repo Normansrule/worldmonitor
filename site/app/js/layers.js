@@ -54,21 +54,25 @@ const point = (layer, d, lat, lng, color, r = 0.22, alt = 0.012, t = '') => ({ l
 export const LAYERS = [
   // ------------------------------------------------------------ LIVE EARTH
   {
-    id: 'quakes', group: 'live', label: 'Earthquakes', swatch: '#f79d5c', on: true, refresh: 5 * 60_000,
+    id: 'quakes', group: 'live', label: 'Earthquakes', swatch: '#f79d5c', on: true, refresh: 5 * 60_000, timeDriven: true,
     sources: ['usgs'],
     options: [{ id: 'feed', label: 'Window', choices: [['2.5_day', 'M2.5+ · 24 h'], ['2.5_week', 'M2.5+ · 7 days'], ['4.5_month', 'M4.5+ · 30 days'], ['significant_month', 'Significant · 30 days']], value: '2.5_week' }],
     async load(o) {
       const j = await getFeed('usgs', `https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/${o.feed}.geojson`);
       return j.features;
     },
-    channels(fs) {
-      const now = Date.now();
+    channels(fs, ctx) {
+      const now = ctx?.now ? ctx.now.getTime() : Date.now(); const live = ctx?.live ?? true;
       const points = []; const rings = [];
+      // In time-machine mode only quakes that have "happened" by the clock are shown, and each one pulses
+      // for its first 3 simulated hours — so a replay shows the planet shaking in the right order.
+      const ringWindow = live ? 36 * 3600_000 : 3 * 3600_000;
       for (const f of fs) {
+        if (!live && f.properties.time > now) continue;
         const [lng, lat, depth] = f.geometry.coordinates; const m = f.properties.mag ?? 0;
         points.push(point('quakes', f, lat, lng, depthColor(depth), 0.07 + m * 0.055, Math.max(0.004, m * m * 0.0016),
           tip(`M${m.toFixed(1)} · ${f.properties.place ?? ''}`, `${Math.round(depth)} km deep · ${new Date(f.properties.time).toUTCString().slice(5, 22)} UTC`)));
-        if (m >= 4.5 && now - f.properties.time < 36 * 3600_000) rings.push({ lat, lng, color: depthColor(depth), maxR: m * 0.9, speed: m * 0.6, period: 1400 });
+        if ((m >= 4.5 || !live) && now - f.properties.time < ringWindow && now >= f.properties.time) rings.push({ lat, lng, color: depthColor(depth), maxR: m * 0.9, speed: m * 0.6, period: 1400 });
       }
       return { points, rings };
     },
@@ -162,7 +166,7 @@ export const LAYERS = [
 
   // ------------------------------------------------------------ SPACE
   {
-    id: 'sun', group: 'space', label: 'Day and night', swatch: '#ffd37a', on: true, refresh: 60_000,
+    id: 'sun', group: 'space', label: 'Day and night', swatch: '#ffd37a', on: true, refresh: 60_000, timeDriven: true,
     sources: ['solar'],
     async load() { return {}; },
     channels(_d, ctx) {
@@ -191,7 +195,7 @@ export const LAYERS = [
     },
   },
   {
-    id: 'stations', group: 'space', label: 'Space stations', swatch: '#ffd37a', on: true, refresh: 2_000,
+    id: 'stations', group: 'space', label: 'Space stations', swatch: '#ffd37a', on: true, refresh: 2_000, timeDriven: true,
     sources: ['celestrak', 'satellitejs', 'tlesnapshot'],
     async load() { return loadGroup('stations'); },
     channels(g, ctx) {
@@ -225,7 +229,7 @@ export const LAYERS = [
     },
   },
   {
-    id: 'satellites', group: 'space', label: 'Satellite shells', swatch: '#b7a3ff', on: false, refresh: 3_000,
+    id: 'satellites', group: 'space', label: 'Satellite shells', swatch: '#b7a3ff', on: false, refresh: 3_000, timeDriven: true,
     sources: ['celestrak', 'satellitejs', 'tlesnapshot'],
     options: [{ id: 'groups', label: 'Groups', multi: true, choices: Object.entries(SAT_GROUPS).filter(([k]) => k !== 'stations').map(([k, g]) => [k, g.label]), value: ['visual', 'gps-ops', 'weather'] }],
     async load(o) {

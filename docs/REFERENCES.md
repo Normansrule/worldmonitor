@@ -42,6 +42,8 @@ Every data source, library and reference used by the Terra Atlas globe app. This
 | [PeeringDB](https://www.peeringdb.com) | PeeringDB Acceptable Use Policy (public data) | Colocation facilities and internet exchanges. |
 | [KiwiSDR public receiver directory (rx.linkfanel.net / kiwisdr.com)](http://rx.linkfanel.net) | Community directory; receivers run by volunteers | Live shortwave receivers you can listen to. |
 | [Fintraffic Digitraffic (marine AIS and road weather cameras)](https://www.digitraffic.fi/en/) | CC BY 4.0 — Fintraffic / digitraffic.fi | Live ships in the Baltic and Finnish road cameras. |
+| [The Space Devs — Launch Library 2](https://thespacedevs.com/llapi) | Free API (15 requests/hour anonymous); community data | Upcoming and recent rocket launches, pads and webcasts. |
+| [GDACS — Global Disaster Alert and Coordination System (UN OCHA and European Commission JRC)](https://www.gdacs.org) | Free public alerts; cite GDACS | Orange and red disaster alerts. |
 | [Open-Meteo forecast & elevation APIs](https://open-meteo.com) | CC BY 4.0 | Weather and ground elevation for any clicked point. |
 | [REST Countries](https://restcountries.com) | MPL-2.0 | Capital, population, languages, currencies for the country card. |
 | [World Bank Open Data API](https://datahelpdesk.worldbank.org/knowledgebase/articles/889392) | CC BY 4.0 | GDP, life expectancy, internet use and renewable share indicators. |
