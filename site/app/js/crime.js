@@ -29,6 +29,17 @@ export const CITIES = [
 const UK = { id: 'uk', name: 'England, Wales and Northern Ireland', src: 'data.police.uk (Home Office)', lag: 'monthly, about two months behind' };
 const inUK = (lat, lng) => lat > 49.8 && lat < 60.9 && lng > -8.3 && lng < 1.9;
 
+/** Which symbol a report gets: a car for vehicle crime, a house for burglary, a bag for theft, and so on. */
+export function crimeGlyph(cat = '') {
+  const c = String(cat).toLowerCase();
+  if (/vehicle|motor|auto|car\b|carjack/.test(c)) return 'car';
+  if (/burglar|break.?in|trespass/.test(c)) return 'house';
+  if (/theft|larceny|shoplift|stolen|pickpocket|purse|bike|bicycle/.test(c)) return 'bag';
+  if (/narcotic|drug|liquor|possession/.test(c)) return 'pill';
+  if (/vandal|damage|mischief|graffiti|arson/.test(c)) return 'spray';
+  if (/homicide|murder|assault|battery|robbery|weapon|shoot|kidnap|violen|rape|sex/.test(c)) return 'siren';
+  return 'badge';
+}
 export function crimeGroup(cat = '') {
   const c = cat.toLowerCase();
   if (/homicide|murder|assault|battery|robbery|weapon|shoot|rape|sex|kidnap|violen|arson|intimidat/.test(c)) return ['Violent', '#f07a63'];
@@ -38,7 +49,8 @@ export function crimeGroup(cat = '') {
 }
 
 export const crimeLayer = {
-  id: 'crime', group: 'civic', label: 'Reported crime', swatch: '#f07a63', on: false, viewDependent: true, reloadOnView: true, pin: 'badge',
+  id: 'crime', group: 'civic', label: 'Reported crime', swatch: '#f07a63', on: false, viewDependent: true, reloadOnView: true, pin: (r) => crimeGlyph(r.cat),
+  legend: [['siren', 'Violent (assault, robbery…)'], ['bag', 'Theft'], ['house', 'Burglary'], ['car', 'Vehicle crime'], ['pill', 'Drugs'], ['spray', 'Vandalism and damage'], ['badge', 'Other']],
   sources: ['chicago', 'datasf', 'nycopen', 'lacity', 'policeuk'],
   async load(_o, ctx) {
     const v = ctx.view;

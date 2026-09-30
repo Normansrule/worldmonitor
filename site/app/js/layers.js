@@ -54,7 +54,7 @@ const point = (layer, d, lat, lng, color, r = 0.22, alt = 0.012, t = '') => ({ l
 export const LAYERS = [
   // ------------------------------------------------------------ LIVE EARTH
   {
-    id: 'quakes', group: 'live', label: 'Earthquakes', swatch: '#f79d5c', on: true, refresh: 5 * 60_000, timeDriven: true,
+    id: 'quakes', pin: 'quake', group: 'live', label: 'Earthquakes', swatch: '#f79d5c', on: true, refresh: 5 * 60_000, timeDriven: true,
     sources: ['usgs'],
     options: [{ id: 'feed', label: 'Window', choices: [['2.5_day', 'M2.5+ · 24 h'], ['2.5_week', 'M2.5+ · 7 days'], ['4.5_month', 'M4.5+ · 30 days'], ['significant_month', 'Significant · 30 days']], value: '2.5_week' }],
     async load(o) {
@@ -94,7 +94,7 @@ export const LAYERS = [
     },
   },
   {
-    id: 'events', pin: (d) => ({ wildfires: 'flame', severeStorms: 'storm', volcanoes: 'volcano', seaLakeIce: 'ice', floods: 'water' }[d.categories?.[0]?.id] ?? 'alert'), group: 'live', label: 'Natural events', swatch: '#ff8a4c', on: true, refresh: 30 * 60_000,
+    id: 'events', legend: [['flame', 'Wildfire'], ['storm', 'Severe storm'], ['volcano', 'Volcano'], ['water', 'Flood'], ['ice', 'Sea and lake ice'], ['drought', 'Drought'], ['dust', 'Dust and haze'], ['landslide', 'Landslide'], ['snow', 'Snow'], ['thermo', 'Temperature extreme'], ['factory', 'Human-made']], pin: (d) => ({ wildfires: 'flame', severeStorms: 'storm', volcanoes: 'volcano', seaLakeIce: 'ice', floods: 'water', earthquakes: 'quake', drought: 'drought', dustHaze: 'dust', landslides: 'landslide', snow: 'snow', tempExtremes: 'thermo', manmade: 'factory', waterColor: 'water' }[d.categories?.[0]?.id] ?? 'alert'), group: 'live', label: 'Natural events', swatch: '#ff8a4c', on: true, refresh: 30 * 60_000,
     sources: ['eonet'],
     async load() {
       const j = await getFeed('eonet', 'https://eonet.gsfc.nasa.gov/api/v3/events?status=open&days=45&limit=500');
@@ -166,7 +166,7 @@ export const LAYERS = [
 
   // ------------------------------------------------------------ SPACE
   {
-    id: 'sun', group: 'space', label: 'Day and night', swatch: '#ffd37a', on: true, refresh: 60_000, timeDriven: true,
+    id: 'sun', pin: 'sun', group: 'space', label: 'Day and night', swatch: '#ffd37a', on: true, refresh: 60_000, timeDriven: true,
     sources: ['solar'],
     async load() { return {}; },
     channels(_d, ctx) {
@@ -174,7 +174,7 @@ export const LAYERS = [
       const line = terminator(ctx.now).map(([a, b]) => [a, b, 0.004]);
       const out = {
         paths: [{ pts: line, color: 'rgba(255,211,122,0.75)', stroke: 0.5, dash: [0.02, 0.01], tip: tip('Terminator', 'the line between day and night') , ref: { layer: 'sun', d: s } }],
-        labels: [{ lat: s.lat, lng: s.lng, text: 'Sun overhead', size: 0.9, color: '#ffd37a', dot: 0.5, ref: { layer: 'sun', d: s } }],
+        points: [{ lat: s.lat, lng: s.lng, alt: 0.05, r: 0.5, color: '#ffd37a', label: 'Sun overhead', tip: tip('Sun overhead', 'the subsolar point'), ref: { layer: 'sun', d: s } }],
       };
       // Texture and tile base maps get a smooth night shade from main.js (a shader sphere lit by the same Sun).
       return out;
@@ -195,20 +195,22 @@ export const LAYERS = [
     },
   },
   {
-    id: 'stations', group: 'space', label: 'Space stations', swatch: '#ffd37a', on: true, refresh: 2_000, timeDriven: true,
+    id: 'stations', pin: 'sat', group: 'space', label: 'Space stations', swatch: '#ffd37a', on: true, refresh: 2_000, timeDriven: true,
     sources: ['celestrak', 'satellitejs', 'tlesnapshot'],
     async load() { return loadGroup('stations'); },
     channels(g, ctx) {
       const pos = positions(g, ctx.now);
-      const labels = []; const paths = [];
+      const labels = []; const paths = []; const points = [];
       for (const p of pos) {
         const iss = /ISS \(ZARYA\)|^ISS$/.test(p.name); const css = /TIANHE/.test(p.name);
         if (!iss && pos.length > 12 && !/TIANGONG|CSS/.test(p.name)) continue;
         const d = { ...p, snapshot: g.snapshot, snapshotEpoch: g.snapshotEpoch };
-        labels.push({ lat: p.lat, lng: p.lng, alt: p.alt, text: iss ? 'ISS' : css ? 'Tiangong' : '', size: 1.1, color: '#ffd37a', dot: iss ? 0.55 : 0.35, ref: { layer: 'stations', d } });
+        const nm = iss ? 'ISS' : css ? 'Tiangong' : p.name;
+        if (iss || css) points.push({ lat: p.lat, lng: p.lng, alt: 0.02, r: iss ? 0.5 : 0.42, color: '#ffd37a', label: nm, tip: tip(nm, `${Math.round(p.altKm)} km up · ${Math.round(p.speedKms * 3600).toLocaleString()} km/h`), ref: { layer: 'stations', d } });
+        else labels.push({ lat: p.lat, lng: p.lng, alt: p.alt, text: '', size: 1.1, color: '#ffd37a', dot: 0.35, ref: { layer: 'stations', d } });
         if (iss) paths.push({ pts: groundTrack(p.sat, g.snapshot, 92, 40, ctx.now).map(([a, b]) => [a, b, 0.003]), color: ['rgba(255,211,122,0.05)', 'rgba(255,211,122,0.8)'], stroke: 0.45, tip: tip('ISS ground track', '±92 minutes ≈ one orbit each way'), ref: { layer: 'stations', d } });
       }
-      return { labels, paths };
+      return { labels, paths, points };
     },
     describe(p) {
       const per = periodMinutes(p.sat);
@@ -424,7 +426,7 @@ export const LAYERS = [
     learn: { what: 'Announced and operating AI compute clusters from World Monitor. Bar height scales with chip count.', how: 'Compiled from company announcements and press reports; planned sites are faded.', try: 'Turn on Pipelines and Nuclear sites too — compute follows cheap, reliable power.', refs: ['worldmonitor'] },
   },
   {
-    id: 'nuclear', pin: 'atom', group: 'infra', label: 'Nuclear sites', swatch: '#9ff0c9', on: false, sources: ['worldmonitor', 'iaea'],
+    id: 'nuclear', pin: 'nuclear', group: 'infra', label: 'Nuclear sites', swatch: '#9ff0c9', on: false, sources: ['worldmonitor', 'iaea'],
     async load() { return (await worldMonitorData()).nuclear; },
     channels(ns) { return { points: ns.map((n) => point('nuclear', n, n.lat, n.lon, n.status === 'active' ? '#9ff0c9' : 'rgba(159,240,201,0.4)', 0.16, 0.008, tip(n.name, `${n.type} · ${n.status}`))) }; },
     describe(n) { return { wiki: n.name, title: n.name, sub: `${n.type} · ${n.status}`, rows: [['Operator / country', n.operator ?? '—']], links: [{ label: 'IAEA PRIS', url: 'https://pris.iaea.org' }, wiki(n.name)] }; },
@@ -463,7 +465,7 @@ export const LAYERS = [
     learn: { what: 'Active conflict theatres as outlined in World Monitor’s static configuration.', how: 'A hand-drawn baseline; the full World Monitor app enriches it with live event data (not available on this static site).', try: 'Turn on Chokepoints: several theatres sit beside a strategic strait.', refs: ['worldmonitor'] },
   },
   {
-    id: 'hotspots', pin: 'alert', group: 'geo', label: 'Watch regions', swatch: '#f07a63', on: false, sources: ['worldmonitor'],
+    id: 'hotspots', pin: 'eye', group: 'geo', label: 'Watch regions', swatch: '#f07a63', on: false, sources: ['worldmonitor'],
     async load() { return (await worldMonitorData()).hotspots; },
     channels(hs) { return { points: hs.map((h) => point('hotspots', h, h.lat, h.lon, '#f07a63', 0.32, 0.02, tip(h.name, h.subtext))) }; },
     describe(h) { return { title: h.name, sub: h.location, body: h.description, links: [wiki(h.name)] }; },

@@ -64,11 +64,12 @@ export const launchesLayer = {
 };
 
 // --------------------------------------------------------------- GDACS disaster alerts
-const GD = { EQ: ['Earthquake', 'alert'], TC: ['Tropical cyclone', 'storm'], FL: ['Flood', 'water'], VO: ['Volcano', 'volcano'], WF: ['Wildfire', 'flame'], DR: ['Drought', 'alert'] };
+const GD = { EQ: ['Earthquake', 'quake'], TC: ['Tropical cyclone', 'storm'], FL: ['Flood', 'water'], VO: ['Volcano', 'volcano'], WF: ['Wildfire', 'flame'], DR: ['Drought', 'drought'] };
 const LEVEL = { Red: '#ff3b30', Orange: '#ff9f43', Green: '#5fd3a9' };
 export const alertsLayer = {
   id: 'alerts', group: 'live', label: 'Disaster alerts (GDACS)', swatch: '#ff3b30', on: false, refresh: 20 * 60_000, fresh: true,
   pin: (d) => GD[d.type]?.[1] ?? 'alert',
+  legend: Object.values(GD).map(([label, g]) => [g, label]),
   sources: ['gdacs'],
   options: [{ id: 'level', label: 'Level', choices: [['Orange;Red', 'Orange and red'], ['Red', 'Red only'], ['Green;Orange;Red', 'All alerts']], value: 'Orange;Red' }],
   async load(o) {

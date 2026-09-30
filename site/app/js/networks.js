@@ -11,8 +11,11 @@ const inView = (v, lat, lng) => Math.abs(lat - v.lat) * 111 < v.radiusKm && have
 
 // --------------------------------------------------------------- power plants (WRI)
 export const FUEL = { Coal: '#8a8f98', Gas: '#ffb15e', Oil: '#b0703c', Nuclear: '#9ff0c9', Hydro: '#4aa3ff', Wind: '#d9f2ff', Solar: '#ffe066', Geothermal: '#ff6f61', Biomass: '#7fc97f', Waste: '#b39ddb', Cogeneration: '#e0a05a', Other: '#cccccc', Storage: '#80deea', Petcoke: '#6d6d6d', 'Wave and Tidal': '#26c6da' };
+export const FUEL_GLYPH = { Coal: 'coal', Gas: 'gas', Oil: 'oil', Nuclear: 'nuclear', Hydro: 'hydro', Wind: 'wind', Solar: 'solar', Geothermal: 'geothermal', Biomass: 'leaf', Waste: 'recycle', Storage: 'battery', Cogeneration: 'factory', Petcoke: 'coal' };
 export const powerLayer = {
-  id: 'power', group: 'infra', label: 'Power plants', swatch: '#ffe066', on: false, viewDependent: true, pin: 'bolt', fresh: true,
+  id: 'power', group: 'infra', label: 'Power plants', swatch: '#ffe066', on: false, viewDependent: true, fresh: true,
+  pin: (p) => FUEL_GLYPH[p.fuel] ?? 'bolt',
+  legend: Object.entries(FUEL_GLYPH).filter(([f]) => FUEL[f] && f !== 'Petcoke').map(([f, g]) => [g, f, FUEL[f]]),
   sources: ['wri'],
   options: [{ id: 'fuel', label: 'Fuel', multi: true, choices: Object.keys(FUEL).slice(0, 10).map((f) => [f, f]), value: ['Coal', 'Gas', 'Oil', 'Nuclear', 'Hydro', 'Wind', 'Solar', 'Geothermal', 'Biomass', 'Waste'] }],
   async load(o) { const d = await getLocal('data/power-plants.json'); return d.rows.map(([name, lat, lng, mw, fuel, country, owner, year, gwh]) => ({ name, lat, lng, mw, fuel, country, owner, year, gwh })).filter((p) => o.fuel.includes(p.fuel) || !FUEL[p.fuel]); },
@@ -34,7 +37,7 @@ export const powerLayer = {
 
 // --------------------------------------------------------------- internet buildings (PeeringDB)
 export const internetLayer = {
-  id: 'internet', group: 'infra', label: 'Internet exchanges & data centres', swatch: '#7ed6c4', on: false, viewDependent: true, pin: 'server', fresh: true,
+  id: 'internet', group: 'infra', label: 'Internet exchanges & data centres', swatch: '#7ed6c4', on: false, viewDependent: true, pin: (f) => (f.ixs ? 'ix' : 'server'), legend: [['ix', 'Building with an internet exchange'], ['server', 'Data centre']],
   sources: ['peeringdb'],
   async load() { const d = await getLocal('data/networks.json').catch(() => { throw new Error('network data not collected yet — run the “Refresh camera data” workflow once'); }); return d.facilities.map(([name, lat, lng, city, country, nets, ixs, web]) => ({ name, lat, lng, city, country, nets, ixs, web })); },
   channels(fs, ctx) {
@@ -80,8 +83,19 @@ export const radioLayer = {
 // --------------------------------------------------------------- live ships (Digitraffic, Baltic & Nordic waters)
 const NAV = ['Under way (engine)', 'At anchor', 'Not under command', 'Restricted manoeuvrability', 'Constrained by draught', 'Moored', 'Aground', 'Fishing', 'Under way (sail)'];
 let vesselMeta = null;
+/** AIS ship-type code → symbol (ITU-R M.1371: 30 fishing, 31–32 & 52 towing/tug, 36–37 sail and pleasure, 60–69 passenger, 70–79 cargo, 80–89 tanker). */
+export function shipGlyph(t) {
+  if (t === 30) return 'fishing';
+  if (t === 31 || t === 32 || t === 52) return 'tug';
+  if (t === 36 || t === 37) return 'sailboat';
+  if (t >= 60 && t <= 69) return 'ferry';
+  if (t >= 80 && t <= 89) return 'tanker';
+  return 'ship';
+}
 export const shipsLayer = {
-  id: 'ships', group: 'live', label: 'Live ships (Baltic)', swatch: '#4aa3ff', on: false, refresh: 60_000, viewDependent: true, fresh: true,
+  id: 'ships', group: 'live', label: 'Live ships (Baltic)', swatch: '#4aa3ff', on: false, refresh: 60_000, viewDependent: true,
+  pin: (s) => shipGlyph(s.meta?.shipType),
+  legend: [['ship', 'Cargo'], ['tanker', 'Tanker'], ['ferry', 'Passenger and ferry'], ['sailboat', 'Sailing and pleasure'], ['fishing', 'Fishing'], ['tug', 'Tug and towing']],
   sources: ['digitraffic'],
   async load() {
     const j = await getFeed('digitraffic', 'https://meri.digitraffic.fi/api/ais/v1/locations', { ttl: 50_000, timeout: 30_000 });
@@ -92,7 +106,7 @@ export const shipsLayer = {
     const v = ctx.view;
     return {
       particles: (ss._particles ??= [{ color: '#4aa3ff', size: 1.8, pts: ss.map((s) => ({ lat: s.lat, lng: s.lng, alt: 0.0015 })) }]),
-      points: (v.altitude < 0.6 ? ss.filter((s) => inView(v, s.lat, s.lng)) : []).slice(0, 1200).map((s) => ({ lat: s.lat, lng: s.lng, alt: 0.003, r: 0.05, color: s.sog > 0.5 ? '#4aa3ff' : '#9fc3e6', label: s.meta?.name ?? String(s.mmsi), tip: tip(s.meta?.name ?? `MMSI ${s.mmsi}`, `${s.sog ?? 0} kn · ${NAV[s.nav] ?? '—'}`), ref: { layer: 'ships', d: s } })),
+      points: (v.altitude < 0.6 ? ss.filter((s) => inView(v, s.lat, s.lng)) : []).slice(0, 1200).map((s) => ({ lat: s.lat, lng: s.lng, alt: 0.003, r: 0.05, color: s.sog > 0.5 ? '#5cc8ff' : '#c9dcec', label: s.meta?.name ?? String(s.mmsi), tip: tip(s.meta?.name ?? `MMSI ${s.mmsi}`, `${s.sog ?? 0} kn · ${NAV[s.nav] ?? '—'}`), ref: { layer: 'ships', d: s } })),
       pick: (ss._pick ??= ss.map((s) => ({ lat: s.lat, lng: s.lng, alt: 0.0015, ref: { layer: 'ships', d: s } }))),
     };
   },

@@ -29,10 +29,15 @@ import { launchesLayer, alertsLayer, countdown } from './launches.js';
 import { installTrace } from './trace.js';
 import { windLayer } from './wind.js';
 import { smallCircle } from './astro.js';
-export const VERSION = '1.7';
+export const VERSION = '1.8';
 const NEW_VERSION = (() => { try { return localStorage.getItem('terra-atlas-version') !== VERSION; } catch { return false; } })();
 
-import { ICONS } from './icons.js';
+import { glyphSvg } from './icons.js';
+// The symbol shown next to each layer name (layers with pins use their own; the rest are listed here).
+const LAYER_GLYPH = { quakes: 'quake', events: 'flame', alerts: 'alert', aircraft: 'plane', stations: 'sat', satellites: 'sat', sun: 'sun', moon: 'moon', power: 'bolt', internet: 'server', ships: 'ship', crime: 'badge', cities: 'city', aurora: 'snow', wind: 'dust', overlay: 'sat', cables: 'ix', pipelines: 'oil', routes: 'ship', plates: 'quake', conflicts: 'swords', grid: 'eye', borders: 'pin' };
+const layerGlyph = (l) => LAYER_GLYPH[l.id] ?? (typeof l.pin === 'string' ? l.pin : null);
+/** The symbol for one item (a wildfire → flame, a tanker → tanker…). */
+const itemGlyph = (ref) => { const l = ref && layerById[ref.layer]; if (!l) return null; try { return (typeof l.pin === 'function' ? l.pin(ref.d) : l.pin) ?? layerGlyph(l); } catch { return layerGlyph(l); } };
 import { orbitOf } from './layers.js';
 import { passes } from './satellites.js';
 
@@ -356,11 +361,11 @@ state.index = new GeoIndex(0.5); state.elevated = [];
 function markerPass(acc) {
   const v = viewOf(state.pov); const q = perf.q;
   markers.setCamera(state.pov.altitude);
-  const pts = acc.points; const labels = acc.labels;
+  const pts = filterByGlyph(acc.points); const labels = acc.labels;
   const selD = state.selected?.d;
   const pins = []; const cols = [];
-  if (v.altitude <= 1.1) {
-    const perLayer = {}; const lat0 = v.lat; const cosl = Math.cos(lat0 * Math.PI / 180);
+  {
+    const perLayer = {}; const far = v.altitude > 1.1; const lat0 = v.lat; const cosl = Math.cos(lat0 * Math.PI / 180);
     const cand = [];
     for (const p of pts) {
       const l = p.ref && layerById[p.ref.layer];
@@ -369,7 +374,9 @@ function markerPass(acc) {
       if (km > v.radiusKm) { cols.push(p); continue; }
       cand.push({ p, km, l });
     }
-    cand.sort((x, y) => x.km - y.km);
+    // Up close the nearest things win; from far away the most important ones do (taller column = bigger quake, bigger plant…).
+    if (far) cand.sort((x, y) => (y.p.alt ?? 0) - (x.p.alt ?? 0) || x.km - y.km); else cand.sort((x, y) => x.km - y.km);
+    if (cand.length > 1500) { for (const c of cand.slice(1500)) cols.push(c.p); cand.length = 1500; }
     // The thing you clicked always stays a pin — it is never clustered away or dropped when you zoom in.
     const si = selD ? cand.findIndex((c) => c.p.ref?.d === selD) : -1;
     if (si > 0) cand.unshift(cand.splice(si, 1)[0]);
@@ -381,20 +388,22 @@ function markerPass(acc) {
       if (!isSel && (pins.length >= q.pins || (perLayer[c.l.id] ?? 0) >= q.pinsPerLayer)) { cols.push(c.p); continue; }
       const sc = globe.getScreenCoords(c.p.lat, c.p.lng, markers.floatAlt);
       if (!sc || sc.x < -40 || sc.y < -40 || sc.x > innerWidth + 40 || sc.y > innerHeight + 40) { cols.push(c.p); continue; }
-      const hitsCard = cards.some((r) => sc.x + 12 > r.x0 && sc.x - 12 < r.x1 && sc.y > r.y0 && sc.y - 34 < r.y1);
+      const hitsCard = cards.some((r) => sc.x + 14 > r.x0 && sc.x - 14 < r.x1 && sc.y + 14 > r.y0 && sc.y - 14 < r.y1);
       const near = placed.find((o) => Math.abs(o.x - sc.x) < 22 && Math.abs(o.y - sc.y) < 26) ?? (hitsCard ? placed.reduce((b, o) => (!b || Math.hypot(o.x - sc.x, o.y - sc.y) < Math.hypot(b.x - sc.x, b.y - sc.y) ? o : b), null) : null);
-      if (near && !isSel) { near.pin.more = (near.pin.more ?? 0) + 1; if (v.altitude > 0.3) cols.push(c.p); else state.clustered.push(c.p); continue; } // up close the "+N" badge stands in for the column
+      if (near && !isSel) { near.pin.more = (near.pin.more ?? 0) + 1; if (v.altitude > 0.3 && !far) cols.push(c.p); else state.clustered.push(c.p); continue; } // up close the "+N" badge stands in for the column
       perLayer[c.l.id] = (perLayer[c.l.id] ?? 0) + 1;
       const icon = typeof c.l.pin === 'function' ? c.l.pin(c.p.ref.d) : c.l.pin;
       const [title, sub] = tipParts(c.p);
-      const rect = { x0: sc.x, x1: sc.x + 36 + Math.min(240, 7.2 * Math.max(title.length, sub.length * 0.9)), y0: sc.y - 44, y1: sc.y - 12 };
-      const cardFree = isSel || cards.length < q.cards && !cards.some((r) => r.x0 < rect.x1 && rect.x0 < r.x1 && r.y0 < rect.y1 && rect.y0 < r.y1)
-        && !placed.some((o) => o.x + 12 > rect.x0 + 30 && o.x - 12 < rect.x1 && o.y > rect.y0 && o.y - 34 < rect.y1);
+      const rect = { x0: sc.x + 14, x1: sc.x + 40 + Math.min(240, 7.2 * Math.max(title.length, sub.length * 0.9)), y0: sc.y - 18, y1: sc.y + 18 };
+      const cardFree = isSel || cards.length < (far ? Math.min(6, q.cards) : q.cards) && !cards.some((r) => r.x0 < rect.x1 && rect.x0 < r.x1 && r.y0 < rect.y1 && rect.y0 < r.y1)
+        && !placed.some((o) => o.x + 14 > rect.x0 && o.x - 14 < rect.x1 && o.y + 14 > rect.y0 && o.y - 14 < rect.y1);
       if (cardFree) cards.push(rect);
-      const pin = { lat: c.p.lat, lng: c.p.lng, alt: c.p.alt, icon, color: solid(c.p.color, c.l.swatch), title, sub, detailed: cardFree, selected: isSel, ref: c.p.ref, tip: c.p.tip };
+      // bigger things get bigger symbols: size follows the marker's radius (magnitude, megawatts, networks…)
+      const size = Math.round(Math.max(24, Math.min(38, 20 + (c.p.r ?? 0.22) * 36)) / 2) * 2;
+      const pin = { lat: c.p.lat, lng: c.p.lng, alt: c.p.alt, icon, size, color: solid(c.p.color, c.l.swatch), title, sub, detailed: cardFree, selected: isSel, ref: c.p.ref, tip: c.p.tip };
       pins.push(pin); placed.push({ x: sc.x, y: sc.y, pin });
     }
-  } else cols.push(...pts);
+  }
   const lbl = labels.slice(0, q.labels).map((l) => ({ lat: l.lat, lng: l.lng, alt: l.alt ?? 0.004, text: l.text, color: solid(l.color, '#eef3f6'), size: l.px ? l.size : Math.max(11, Math.min(16, (l.size ?? 1) * 12)), ref: l.ref, tip: l.tip }));
   markers.setPoints(cols.length > q.columns ? cols.slice(0, q.columns) : cols, zk());
   markers.setSprites(pins, lbl);
@@ -405,6 +414,34 @@ function markerPass(acc) {
   state.index = idx; state.elevated = elevated;
   cullSprites();
 }
+// Symbol filters: click a symbol in a layer's key to hide or show that kind (e.g. only wildfires).
+state.hideGlyph = {};
+function filterByGlyph(pts) {
+  const active = Object.entries(state.hideGlyph).filter(([, set]) => set.size);
+  if (!active.length) return pts;
+  const hide = Object.fromEntries(active);
+  return pts.filter((p) => { const set = p.ref && hide[p.ref.layer]; return !set || !set.has(itemGlyph(p.ref)); });
+}
+function toggleGlyph(layerId, g) {
+  const set = (state.hideGlyph[layerId] ??= new Set());
+  if (set.has(g)) set.delete(g); else set.add(g);
+  document.querySelectorAll(`[data-gfilter="${layerId}:${g}"]`).forEach((b) => b.setAttribute('aria-pressed', String(!set.has(g))));
+  compose.forceMarkers = true; compose();
+}
+/** Kinds actually on the map for a layer right now (so the key only lists what you can see). */
+function presentGlyphs(l) {
+  const pts = state.chan[l.id]?.points; if (!pts?.length) return new Set();
+  const out = new Set(); for (const p of pts) { const g = itemGlyph(p.ref); if (g) out.add(g); if (out.size >= l.legend.length) break; } return out;
+}
+function chipsInner(l) {
+  const have = presentGlyphs(l); const hidden = state.hideGlyph[l.id] ?? new Set();
+  return l.legend.filter(([g]) => have.has(g) || hidden.has(g)).map(([g, label, c]) => `<button class="lchip" data-gfilter="${l.id}:${g}" aria-pressed="${!hidden.has(g)}" title="Show or hide: ${esc(label)}">${glyphSvg(g, c ?? l.swatch, 16)}<span>${esc(label.replace(/ \(.*\)$/, ''))}</span></button>`).join('');
+}
+function renderChips(id) {
+  const l = layerById[id]; const el = document.querySelector(`[data-lchips="${id}"]`); if (!l?.legend || !el) return;
+  const html = state.on.has(id) ? chipsInner(l) : ''; if (el.innerHTML !== html) el.innerHTML = html; el.hidden = !html;
+}
+const legendChips = (l) => (l.legend ? `<div class="lchips" data-lchips="${l.id}" role="group" aria-label="Show or hide kinds" ${state.on.has(l.id) ? '' : 'hidden'}>${state.on.has(l.id) ? chipsInner(l) : ''}</div>` : '');
 function tipParts(p) {
   const m = /<b>([\s\S]*?)<\/b>(?:<span>([\s\S]*?)<\/span>)?/.exec(p.tip ?? '');
   const clean = (x) => (x ?? '').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim();
@@ -459,6 +496,7 @@ function setLStatus(id, s, note = '') {
   if (dot) { dot.dataset.s = s; dot.title = note || (s === 'ok' ? 'Loaded' : s === 'loading' ? 'Loading…' : ''); }
   const ln = document.querySelector(`[data-lnote="${id}"]`);
   if (ln) { ln.textContent = note; ln.dataset.s = s; ln.hidden = !note || !state.on.has(id) || s === 'loading'; }
+  if (s === 'ok') renderChips(id);
 }
 const PRESETS = [
   ['Connected planet', ['sun', 'borders', 'cities', 'cables', 'internet', 'power', 'aircraft', 'ships', 'radio', 'stations', 'satellites']],
@@ -481,10 +519,11 @@ function renderLayerPanel() {
         <div class="layer" style="--sw:${l.swatch}">
           <input type="checkbox" id="ly-${l.id}" data-layer="${l.id}" ${(state.pending.has(l.id) ? state.pending.get(l.id) : state.on.has(l.id)) ? 'checked' : ''}/>
           <label class="sw" for="ly-${l.id}" aria-hidden="true"></label>
-          <label for="ly-${l.id}">${esc(l.label)}${l.fresh ? ' <em class="new">new</em>' : ''}${state.pending.has(l.id) ? ' <em class="pend">' + (state.pending.get(l.id) ? 'will show' : 'will hide') + '</em>' : ''}<span class="cnt" data-count="${l.id}">${state.on.has(l.id) ? countOf(l.id) : ''}</span></label>
+          <label for="ly-${l.id}">${layerGlyph(l) ? glyphSvg(layerGlyph(l), l.swatch, 17) : ''}${esc(l.label)}${l.fresh ? ' <em class="new">new</em>' : ''}${state.pending.has(l.id) ? ' <em class="pend">' + (state.pending.get(l.id) ? 'will show' : 'will hide') + '</em>' : ''}<span class="cnt" data-count="${l.id}">${state.on.has(l.id) ? countOf(l.id) : ''}</span></label>
           <span class="st" data-status="${l.id}" data-s="${state.lstatus[l.id]?.s ?? ''}"></span>
           <button class="learn" data-learn="${l.id}" aria-label="Learn about ${esc(l.label)}">Learn</button>
           ${(l.options ?? []).map((o) => optionHtml(l, o)).join('')}
+          ${legendChips(l)}
           <p class="lnote" data-lnote="${l.id}" data-s="${state.lstatus[l.id]?.s ?? ''}" ${state.on.has(l.id) && state.lstatus[l.id]?.note && state.lstatus[l.id]?.s !== 'loading' ? '' : 'hidden'}>${esc(state.lstatus[l.id]?.note ?? '')}</p>
         </div>`).join('')}
     </section>`).join('');
@@ -546,6 +585,7 @@ function toggleLayer(id, on, { quiet = false } = {}) {
   if (on) state.on.add(id); else { state.on.delete(id); updateCount(id); }
   updateShade();
   const cb = document.getElementById(`ly-${id}`); if (cb) cb.checked = on;
+  renderChips(id); const ln = document.querySelector(`[data-lnote="${id}"]`); if (ln && !on) ln.hidden = true;
   if (on) refreshLayer(id); else compose();
   writeHash();
 }
@@ -575,7 +615,7 @@ function select(ref) {
   const key = `sel:${ref.layer}:${c.title}`;
   openNotes(l.label, `
     <div id="sel-wiki"></div>
-    <h3>${esc(c.title)}</h3>${c.sub ? `<p class="sub">${esc(c.sub)}</p>` : ''}
+    <h3 class="withglyph">${itemGlyph(ref) ? glyphSvg(itemGlyph(ref), l.swatch, 30) : ''}<span>${esc(c.title)}</span></h3>${c.sub ? `<p class="sub">${esc(c.sub)}</p>` : ''}
     ${c.html ?? ''}${rowsHtml(c.rows)}${c.body ? `<p>${esc(c.body)}</p>` : ''}
     ${c.actions?.length ? `<div class="row">${c.actions.map(([a, t]) => `<button class="btn ghost" data-action="${a}">${esc(t)}</button>`).join('')}</div><div id="sel-action"></div>` : ''}
     ${linksHtml(c.links)}
@@ -627,6 +667,10 @@ async function runAction(kind) {
   if (kind === 'zoom-alpr' && ref?.d) globe.pointOfView({ lat: ref.d.lat, lng: ref.d.lng, altitude: 0.25 }, reduceMotion ? 0 : 1500);
   if (kind === 'near-flights' && ref?.d) { state.opts.aircraft.scope = 'near'; delete state.data.aircraft; toggleLayer('aircraft', true); renderLayerPanel(); globe.pointOfView({ lat: ref.d.lat, lng: ref.d.lng, altitude: 0.08 }, reduceMotion ? 0 : 1500); }
 }
+function legendHtml(l) {
+  const items = l.legend ?? (layerGlyph(l) ? [[layerGlyph(l), l.label]] : []);
+  return items.length ? `<h4>Symbols on the map</h4>${l.legend ? '<p class="muted">Click a symbol to hide or show that kind.</p>' : ''}<div class="legend">${items.map(([g, label, c]) => (l.legend ? `<button class="lchip" data-gfilter="${l.id}:${g}" aria-pressed="${!state.hideGlyph[l.id]?.has(g)}">${glyphSvg(g, c ?? l.swatch, 24)}<span>${esc(label)}</span></button>` : `<span>${glyphSvg(g, c ?? l.swatch, 24)}${esc(label)}</span>`)).join('')}</div>` : '';
+}
 function showLearn(id) {
   const l = layerById[id]; const st = state.lstatus[id];
   const extra = l.describeLayer && state.data[id] ? rowsHtml(l.describeLayer(state.data[id]).rows) : '';
@@ -634,6 +678,7 @@ function showLearn(id) {
     <h3>${esc(l.label)}</h3>
     ${st?.note ? `<p class="${st.s === 'error' ? 'err' : 'muted'}">${esc(st.note)}</p>` : ''}
     ${extra}
+    ${legendHtml(l)}
     <h4>What you are seeing</h4><p>${esc(l.learn.what)}</p>
     <h4>How it is measured</h4><p>${esc(l.learn.how)}</p>
     <h4>Try this</h4><p>${esc(l.learn.try)}</p>
@@ -661,6 +706,7 @@ $('#notes-body').addEventListener('click', (e) => {
   if (t.dataset.cam) { const c = state.data.cameras?.cams.find((x) => x.id === t.dataset.cam); if (c) { select({ layer: 'cameras', d: c }); fly(c.lat, c.lng, Math.min(state.pov.altitude, 0.02)); } }
   if (t.dataset.alprLive) layerById.alpr.fetchLive(viewOf(state.pov)).then((n) => { t.textContent = `Loaded ${n} from OpenStreetMap`; refreshLayer('alpr'); }).catch(() => { t.textContent = 'Overpass did not respond — try again shortly'; });
 });
+document.addEventListener('click', (e) => { const gf = e.target.closest('[data-gfilter]'); if (gf) { const [lid, g] = gf.dataset.gfilter.split(':'); toggleGlyph(lid, g); } });
 document.addEventListener('click', (e) => { if (e.target.closest('[data-open-about]')) { e.preventDefault(); setMode('about'); } });
 document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => {
   if (b.dataset.close === 'notes') { closeNotes(); if (state.mode) setMode(null); } else $('#layers').classList.remove('open');
@@ -1068,6 +1114,7 @@ $('#globe').addEventListener('pointerup', (e) => {
   if (e.target.closest?.('.pinx')) return;
   const rect = $('#globe').getBoundingClientRect(); const x = e.clientX - rect.left; const y = e.clientY - rect.top;
   const hit = pickAt(x, y);
+  if (hit?.zoom) { state.hitAt = performance.now(); state.clickConsumed = true; globe.pointOfView({ lat: hit.lat, lng: hit.lng, altitude: Math.max(0.0006, state.pov.altitude / 3) }, reduceMotion ? 0 : 900); toast(`Zooming in on ${hit.more + 1} markers here`); return; }
   if (hit) { state.hitAt = performance.now(); state.clickConsumed = true; select(hit.ref); }
 }, true);
 function kmPerPx() { const fov = (globe.camera().fov * Math.PI) / 180; return Math.max(0.0005, (2 * state.pov.altitude * astro.R_EARTH_KM * Math.tan(fov / 2)) / innerHeight); }
@@ -1104,7 +1151,7 @@ $('#globe').addEventListener('pointermove', (e) => {
   const now = performance.now(); if (now - hoverAt < 70) return; hoverAt = now;
   const rect = $('#globe').getBoundingClientRect(); const x = e.clientX - rect.left; const y = e.clientY - rect.top;
   const h = pickAt(x, y, { elevated: false });
-  if (h?.tip) { tipEl.innerHTML = h.tip; tipEl.hidden = false; tipEl.style.transform = `translate(${Math.min(e.clientX + 14, innerWidth - 300)}px, ${e.clientY + 14}px)`; $('#globe').style.cursor = 'pointer'; }
+  if (h?.tip) { const gn = !h.zoom && itemGlyph(h.ref); tipEl.innerHTML = (gn ? glyphSvg(gn, solid(h.color, layerById[h.ref.layer]?.swatch ?? '#eef3f6'), 22) : '') + h.tip; tipEl.hidden = false; tipEl.style.transform = `translate(${Math.min(e.clientX + 14, innerWidth - 300)}px, ${e.clientY + 14}px)`; $('#globe').style.cursor = 'pointer'; }
   else { tipEl.hidden = true; if (!state.hover) $('#globe').style.cursor = state.mode === 'measure' || state.mode === 'quiz' ? 'crosshair' : ''; }
 });
 $('#globe').addEventListener('pointerleave', () => { tipEl.hidden = true; });
@@ -1261,7 +1308,17 @@ if (state.look === 'hud') hud.show(true);
 if (NEW_VERSION) { setTimeout(whatsNew, 600); try { localStorage.setItem('terra-atlas-version', VERSION); } catch { /* private mode */ } }
 else if (!location.hash.includes('@') && !isMobile) welcome();
 function whatsNew() {
-  openNotes(`What’s new in v${VERSION}`, `<h3>Live flights everywhere, a smoother globe, and the Moon</h3>
+  const g = (n, c) => glyphSvg(n, c, 26);
+  openNotes(`What’s new in v${VERSION}`, `<h3>Every marker is now the shape of what it is</h3>
+    <p class="sub">No more identical bubbles: a wildfire is a flame, an earthquake a seismogram, a ship a ship. Bigger quakes and bigger power stations get bigger symbols.</p>
+    <div class="legend">
+      <span>${g('flame', '#ff8a4c')}Wildfire</span><span>${g('quake', '#f79d5c')}Earthquake</span><span>${g('storm', '#9fc3e6')}Tropical storm</span><span>${g('volcano', '#ff6f61')}Volcano</span>
+      <span>${g('ship', '#4aa3ff')}Cargo ship</span><span>${g('tanker', '#4aa3ff')}Tanker</span><span>${g('ferry', '#4aa3ff')}Ferry</span><span>${g('sailboat', '#4aa3ff')}Sailing boat</span>
+      <span>${g('nuclear', '#9ff0c9')}Nuclear plant</span><span>${g('wind', '#d9f2ff')}Wind farm</span><span>${g('solar', '#ffe066')}Solar farm</span><span>${g('hydro', '#4aa3ff')}Hydro dam</span>
+      <span>${g('camera', '#7ed6c4')}Traffic camera</span><span>${g('alpr', '#f07a63')}Plate reader</span><span>${g('car', '#ffd37a')}Vehicle crime</span><span>${g('rocket', '#ff9e5e')}Rocket launch</span>
+    </div>
+    <p class="muted">Each layer now has a key of its symbols: click one (in the layer list or in Learn) to hide or show that kind, for example only wildfires, or no thefts. Click a “+N” badge to zoom into a cluster. Symbols also appear in hover cards, field notes and the Live feed.</p>
+    <h4>From v1.7 — live flights everywhere, a smoother globe, and the Moon</h4>
     <p class="sub">Press <kbd>Ctrl</kbd>+<kbd>K</kbd> (or the ⌘K button at the top) to find anything, then try these:</p>
     <div class="starts">
       <button class="tour-card" data-start="flights"><b>✈ Live flights that actually load</b><span>Browsers block flight trackers, so the website now reads a worldwide snapshot refreshed every 10 minutes and moves each plane forward along its heading. The desktop app reads them live.</span></button>

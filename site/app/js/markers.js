@@ -9,7 +9,7 @@
 //   • a lat/lng grid index so hover and click find the nearest thing in microseconds instead of
 //     projecting every marker to the screen.
 import { THREE } from '../vendor/vendor.min.mjs';
-import { ICONS } from './icons.js';
+import { GLYPHS, INK, lighten } from './icons.js';
 
 const R = 100;
 const D2R = Math.PI / 180;
@@ -50,13 +50,33 @@ export class GeoIndex {
   }
 }
 
-// ------------------------------------------------------------------ icon bitmaps
-const iconImgs = {};
-export const iconsReady = Promise.all(Object.entries(ICONS).map(([k, svg]) => new Promise((res) => {
-  const img = new Image();
-  img.onload = () => { iconImgs[k] = img; res(); }; img.onerror = res;
-  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" ').replace(/currentColor/g, '#081827'))}`;
-})));
+// ------------------------------------------------------------------ map symbols (Path2D, drawn in any colour)
+const pathCache = new Map();
+const P2 = (d) => { let p = pathCache.get(d); if (!p) { p = new Path2D(d); pathCache.set(d, p); } return p; };
+export const iconsReady = Promise.resolve(); // symbols are vector paths now: nothing to load
+
+/** Draw one symbol centred at (cx, cy), `size` canvas pixels across, with a dark halo so it reads on any map. */
+export function drawGlyph(g, name, color, cx, cy, size, { selected = false, halo = INK } = {}) {
+  const parts = GLYPHS[name] ?? GLYPHS.pin; const light = lighten(color);
+  const paint = (st) => (st.endsWith('d') ? INK : st.endsWith('l') ? light : color);
+  g.save(); g.translate(cx - size / 2, cy - size / 2); g.scale(size / 24, size / 24);
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  // 1. halo (and a soft shadow under it), so the symbol stands off satellite imagery and dark oceans alike
+  g.shadowColor = selected ? color : 'rgba(0,0,0,0.55)'; g.shadowBlur = selected ? 10 * S : 3 * S; g.shadowOffsetY = selected ? 0 : 1 * S;
+  const hw = selected ? 4.2 : 2.6; const hc = selected ? '#ffffff' : halo;
+  for (const [d, st, w] of parts) {
+    const p = P2(d); g.strokeStyle = hc; g.fillStyle = hc;
+    if (st[0] === 's') { g.lineWidth = (w ?? 2.2) + hw; g.stroke(p); } else { g.lineWidth = hw; g.stroke(p); g.fill(p, 'evenodd'); }
+  }
+  g.shadowColor = 'transparent'; g.shadowBlur = 0; g.shadowOffsetY = 0;
+  if (selected) for (const [d, st, w] of parts) { const p = P2(d); g.strokeStyle = INK; g.fillStyle = INK; if (st[0] === 's') { g.lineWidth = (w ?? 2.2) + 1.6; g.stroke(p); } else { g.lineWidth = 1.6; g.stroke(p); g.fill(p, 'evenodd'); } }
+  // 2. the symbol itself
+  for (const [d, st, w] of parts) {
+    const p = P2(d);
+    if (st[0] === 's') { g.strokeStyle = paint(st); g.lineWidth = w ?? 2.2; g.stroke(p); } else { g.fillStyle = paint(st); g.fill(p, 'evenodd'); }
+  }
+  g.restore();
+}
 
 // ------------------------------------------------------------------ canvas sprite factory (LRU cache)
 const texCache = new Map();
@@ -73,37 +93,39 @@ function cachedTexture(key, draw) {
 const FONT = '"Atkinson Hyperlegible","Segoe UI",Arial,sans-serif';
 const S = 2; // draw at 2× for crisp text
 
-function drawPin(cv, { icon, color, title, sub, detailed, more, selected }) {
+/** A marker is the symbol itself (no bubble), centred on its location, with an optional name card beside it. */
+function drawPin(cv, { icon, color, title, sub, detailed, more, selected, size = 28 }) {
   const ctx = cv.getContext('2d');
   ctx.font = `700 ${13 * S}px ${FONT}`;
   const tw = detailed ? Math.min(230 * S, ctx.measureText(title).width) : 0;
   ctx.font = `400 ${11.5 * S}px ${FONT}`;
   const sw = detailed && sub ? Math.min(230 * S, ctx.measureText(sub).width) : 0;
-  const bubble = 30 * S; const pad = 8 * S; const textW = Math.max(tw, sw);
-  const w = bubble + (detailed ? pad + textW + pad : more ? 16 * S : 0) + 4 * S; const h = bubble + 12 * S;
+  const G = (selected ? Math.max(36, size + 8) : size) * S; const box = G + 12 * S; const pad = 8 * S; const textW = Math.max(tw, sw);
+  const cardH = (sub ? 34 : 26) * S; const badge = more ? 12 * S : 0; const left = more ? 22 * S : 0; // the "+N" badge sits to the upper left, clear of the card
+  const w = left + box + (detailed ? pad + textW + pad + 4 * S : 0); const h = Math.max(box, cardH + 4 * S) + badge * 2;
   cv.width = Math.ceil(w); cv.height = Math.ceil(h);
   const g = cv.getContext('2d');
-  if (detailed) { // label card
-    g.fillStyle = 'rgba(8,24,39,0.88)'; g.strokeStyle = 'rgba(36,73,107,1)'; g.lineWidth = 1 * S;
-    roundRect(g, bubble / 2, 2 * S, w - bubble / 2 - 2 * S, bubble - 2 * S, 8 * S); g.fill(); g.stroke();
-    g.fillStyle = '#eef3f6'; g.font = `700 ${13 * S}px ${FONT}`; g.textBaseline = 'alphabetic';
-    g.fillText(ellipsis(g, title, 230 * S), bubble + pad, (sub ? 15 : 20) * S);
-    if (sub) { g.fillStyle = '#a9bccb'; g.font = `400 ${11.5 * S}px ${FONT}`; g.fillText(ellipsis(g, sub, 230 * S), bubble + pad, 27 * S); }
+  const cx = left + box / 2; const cy = h / 2;
+  if (detailed) { // name card, with a stripe in the symbol's colour
+    const x0 = left + box - 6 * S; const y0 = cy - cardH / 2; const cw = w - x0 - 2 * S;
+    g.fillStyle = 'rgba(8,24,39,0.9)'; g.strokeStyle = 'rgba(36,73,107,1)'; g.lineWidth = 1 * S;
+    roundRect(g, x0, y0, cw, cardH, 7 * S); g.fill(); g.stroke();
+    g.fillStyle = color; roundRect(g, x0, y0, 4 * S, cardH, 2 * S); g.fill();
+    g.fillStyle = '#eef3f6'; g.font = `700 ${13 * S}px ${FONT}`; g.textBaseline = 'middle';
+    g.fillText(ellipsis(g, title, 230 * S), x0 + pad + 2 * S, sub ? cy - 7 * S : cy);
+    if (sub) { g.fillStyle = '#a9bccb'; g.font = `400 ${11.5 * S}px ${FONT}`; g.fillText(ellipsis(g, sub, 230 * S), x0 + pad + 2 * S, cy + 8 * S); }
   }
-  // teardrop marker
-  const cx = bubble / 2 + 1 * S; const cy = bubble / 2 + 1 * S; const r = bubble / 2 - 1 * S;
-  g.beginPath(); g.moveTo(cx - r * 0.55, cy + r * 0.8); g.lineTo(cx, h - 1 * S); g.lineTo(cx + r * 0.55, cy + r * 0.8); g.closePath();
-  g.fillStyle = color; g.fill();
-  g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fillStyle = color; g.fill();
-  g.lineWidth = (selected ? 3.5 : 2) * S; g.strokeStyle = selected ? '#ffffff' : 'rgba(8,24,39,0.85)'; g.stroke();
-  const img = iconImgs[icon] ?? iconImgs.pin;
-  if (img) g.drawImage(img, cx - 9 * S, cy - 9 * S, 18 * S, 18 * S);
-  if (more) { // cluster badge
+  drawGlyph(g, icon, color, cx, cy, G, { selected });
+  let badgeBox = null;
+  if (more) { // cluster badge: "+N more like this here"
     const txt = `+${more > 99 ? '99' : more}`; g.font = `700 ${10 * S}px ${FONT}`; const bw = g.measureText(txt).width + 8 * S;
-    g.fillStyle = '#eef3f6'; roundRect(g, cx + r * 0.35, 0.5 * S, bw, 13 * S, 6.5 * S); g.fill();
-    g.fillStyle = '#081827'; g.textBaseline = 'middle'; g.fillText(txt, cx + r * 0.35 + 4 * S, 7.2 * S);
+    const bx = Math.max(1 * S, cx - G * 0.3 - bw); const by = cy - G / 2 - 4 * S;
+    g.fillStyle = '#eef3f6'; g.strokeStyle = INK; g.lineWidth = 1.5 * S; roundRect(g, bx, by, bw, 13 * S, 6.5 * S); g.fill(); g.stroke();
+    g.fillStyle = '#081827'; g.textBaseline = 'middle'; g.fillText(txt, bx + 4 * S, by + 6.7 * S);
+    // badge rectangle in screen pixels relative to the symbol's centre (for "click +N to zoom in")
+    badgeBox = { x0: (bx - cx) / S - 3, x1: (bx + bw - cx) / S + 3, y0: (by - cy) / S - 3, y1: (by + 13 * S - cy) / S + 3 };
   }
-  return { anchorX: cx / cv.width };
+  return { anchorX: cx / cv.width, anchorY: 0.5, hitR: G / 2 / S, badge: badgeBox };
 }
 function drawLabel(cv, { text, color, size }) {
   const ctx = cv.getContext('2d'); const fs = Math.round(size * S);
@@ -193,9 +215,9 @@ export class MarkerRenderer {
     }
     let k = 0;
     for (const p of pins) {
-      const key = `p|${p.icon}|${p.color}|${p.more ?? 0}|${p.selected ? 1 : 0}|${p.detailed ? `${p.title}|${p.sub}` : ''}`;
+      const key = `p|${p.icon}|${p.color}|${p.size ?? 28}|${p.more ?? 0}|${p.selected ? 1 : 0}|${p.detailed ? `${p.title}|${p.sub}` : ''}`;
       const t = cachedTexture(key, (cv) => drawPin(cv, p));
-      this.place(this.pool[k++], p, t, 0);
+      this.place(this.pool[k++], p, t, t.anchorY ?? 0.5);
     }
     for (const l of labels) {
       const key = `l|${l.text}|${l.color}|${Math.round(l.size)}`;
@@ -211,22 +233,26 @@ export class MarkerRenderer {
     const alt = this.spriteAlt(d); d.renderAlt = alt;
     const c = this.globe.getCoords(d.lat, d.lng, alt);
     sp.position.set(c.x, c.y, c.z); sp.material.map = t.tex; sp.material.needsUpdate = true; sp.visible = true;
-    sp.center.set(t.anchorX, anchorY); sp.userData = { d, t, anchorY };
+    sp.center.set(t.anchorX, anchorY); sp.userData = { d, t, anchorY, pin: t.hitR != null };
     sp.scale.set((t.w / S) * this.pixelScale, (t.h / S) * this.pixelScale, 1);
   }
   /** Re-seat every visible sprite for a new zoom level (cheap: positions only). */
   reseat() { for (const sp of this.pool) if (sp.visible || sp.userData.want) { const d = sp.userData.d; if (!d) continue; const alt = this.spriteAlt(d); d.renderAlt = alt; const c = this.globe.getCoords(d.lat, d.lng, alt); sp.position.set(c.x, c.y, c.z); } }
   layoutSprites() { for (const sp of this.pool) if (sp.visible && sp.userData.t) sp.scale.set((sp.userData.t.w / S) * this.pixelScale, (sp.userData.t.h / S) * this.pixelScale, 1); }
 
-  /** Screen-space hit test on visible pins (they stick up above their anchor). */
+  /** Screen-space hit test on visible symbols: the symbol itself, or its name card. */
   hitPin(x, y, occluded) {
     let best = null;
     for (const sp of this.pool) {
-      if (!sp.visible || !sp.userData.d || sp.userData.anchorY !== 0) continue;
+      if (!sp.visible || !sp.userData.d || !sp.userData.pin) continue;
       const d = sp.userData.d; const s = this.globe.getScreenCoords(d.lat, d.lng, d.renderAlt ?? 0.004); if (!s) continue;
       if (occluded(d)) continue;
-      const w = sp.userData.t.w / S; const h = sp.userData.t.h / S; const left = s.x - w * sp.center.x;
-      if (x >= left && x <= left + w && y >= s.y - h && y <= s.y) { if (!best || s.y > best.y) best = { d, y: s.y }; }
+      const t = sp.userData.t; const w = t.w / S; const h = t.h / S;
+      const left = s.x - w * sp.center.x; const top = s.y - h * (1 - sp.center.y);
+      const b = t.badge; if (b && x - s.x >= b.x0 && x - s.x <= b.x1 && y - s.y >= b.y0 && y - s.y <= b.y1) return { zoom: true, lat: d.lat, lng: d.lng, more: d.more, tip: `<div class="tip"><b>${d.more} more here</b><span>Click to zoom in</span></div>` };
+      const onSymbol = Math.hypot(x - s.x, y - s.y) <= t.hitR + 4;
+      const onCard = x >= left && x <= left + w && y >= top && y <= top + h && x > s.x;
+      if (onSymbol || onCard) { const dist = Math.hypot(x - s.x, y - s.y); if (!best || dist < best.dist) best = { d, dist }; }
     }
     return best?.d ?? null;
   }

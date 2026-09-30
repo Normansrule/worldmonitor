@@ -10,7 +10,7 @@ const GLYPH = ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘'];
 export const moonGlyph = (age) => GLYPH[Math.round(age / 45) % 8];
 
 export const moonLayer = {
-  id: 'moon', group: 'space', label: 'Moon and tides', swatch: '#d9e2ea', on: false, refresh: 60_000, timeDriven: true, fresh: true,
+  id: 'moon', pin: (d) => (d.kind === 'anti' ? 'water' : 'moon'), legend: [['moon', 'Moon straight overhead'], ['water', 'Opposite tidal bulge']], group: 'space', label: 'Moon and tides', swatch: '#d9e2ea', on: false, refresh: 60_000, timeDriven: true, fresh: true,
   sources: ['lunar'],
   async load() { return {}; },
   channels(_d, ctx) {
@@ -18,9 +18,9 @@ export const moonLayer = {
     const anti = { lat: -m.lat, lng: wrapLng(m.lng + 180) };
     const g = moonGlyph(m.age);
     return {
-      labels: [
-        { lat: m.lat, lng: m.lng, text: `${g} Moon overhead`, size: 0.95, color: '#e8eef3', dot: 0.5, ref: { layer: 'moon', d: { ...m, kind: 'sub' } } },
-        { lat: anti.lat, lng: anti.lng, text: 'Opposite tidal bulge', size: 0.75, color: '#9fc3e6', dot: 0.35, ref: { layer: 'moon', d: { ...m, kind: 'anti' } } },
+      points: [
+        { lat: m.lat, lng: m.lng, alt: 0.05, r: 0.5, color: '#e8eef3', label: 'Moon overhead', tip: tip(`${g} Moon overhead`, `${m.name} · ${Math.round(m.illum * 100)} % lit`), ref: { layer: 'moon', d: { ...m, kind: 'sub' } } },
+        { lat: anti.lat, lng: anti.lng, alt: 0.03, r: 0.4, color: '#9fc3e6', label: 'Opposite tidal bulge', tip: tip('Opposite tidal bulge', 'the ocean bulges here too'), ref: { layer: 'moon', d: { ...m, kind: 'anti' } } },
       ],
       paths: [{ pts: smallCircle(m.lat, m.lng, 90, 240).map(([a, b]) => [a, b, 0.004]), color: 'rgba(217,226,234,0.55)', stroke: 0.35, dash: [0.012, 0.012],
         tip: tip('Moonrise / moonset line', 'the Moon is on the horizon along this line'), ref: { layer: 'moon', d: { ...m, kind: 'line' } } }],

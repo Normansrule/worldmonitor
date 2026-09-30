@@ -387,3 +387,19 @@ kbd { font: 600 11.5px/1 var(--body); border: 1px solid var(--rule); border-bott
 .bar b { text-align: right; font-variant-numeric: tabular-nums; }
 .viewrow { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start; }
 @media (prefers-reduced-motion: reduce) { .ride-dot { animation: none; } }
+
+/* ---------- v1.8: map symbols ---------- */
+.layer label .glyph { vertical-align: -3px; margin-right: 6px; flex: none; }
+.legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 12px; margin: 4px 0 12px; }
+.legend span { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--paper); }
+.legend .glyph { flex: none; }
+h3.withglyph { display: flex; align-items: center; gap: 10px; }
+h3.withglyph .glyph { flex: none; }
+.hovertip { display: flex; gap: 8px; align-items: flex-start; }
+.hovertip > .glyph { flex: none; margin-top: 2px; }
+.ticker i .glyph, .feed i .glyph { vertical-align: -4px; }
+.lchips { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 4px; }
+.lchip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--rule); background: transparent; border-radius: 999px; padding: 2px 8px 2px 4px; font-size: 12px; cursor: pointer; }
+.lchip[aria-pressed='false'] { opacity: 0.4; text-decoration: line-through; }
+.lchip:hover { border-color: var(--brass); }
+.legend .lchip { border-radius: 10px; padding: 4px 8px; font-size: 13px; justify-content: flex-start; }

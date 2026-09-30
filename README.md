@@ -23,6 +23,30 @@ Built on [World Monitor](https://github.com/koala73/worldmonitor) by Elie Habib.
 
 ---
 
+## 🔥 New in v1.8: every marker is the shape of what it is
+
+<img src="site/docs-media/symbols-sheet.jpg" alt="Sheet of all 58 Terra Atlas map symbols: flame, seismogram, volcano, hurricane, flood, ships, tanker, ferry, sailboat, CCTV camera, plate reader, rocket, power-plant types and more" />
+
+| | |
+|---|---|
+| **Symbols instead of bubbles** | Markers used to be identical teardrop pins with a small icon inside. Now each marker *is* its symbol, with no bubble around it: a flame for a wildfire, a seismogram for an earthquake, a hurricane spiral for a tropical storm, a cargo ship, tanker, ferry, sailing boat, fishing boat or tug for each AIS ship type, a pump jack, wind turbine, dam, solar panel, reactor trefoil or smokestack for each power-plant fuel, a car, house, bag, pill, spray can or siren for each kind of crime report, a CCTV camera, a plate reader, a rocket, a satellite for the ISS, and the Sun and Moon where they are overhead. 58 symbols in total, drawn as vector paths (`site/app/js/icons.js`) in the layer's colour with a dark halo, so they read on satellite imagery and on dark oceans alike. |
+| **Size means something** | Bigger earthquakes, bigger power stations and busier internet buildings get bigger symbols (from 24 to 38 px). The one you clicked grows and gets a white halo. |
+| **A key for every layer, and filters** | Each layer lists the kinds currently on the map (in the layer list and in Learn). Click a kind to hide or show it, for example only wildfires, or no thefts. |
+| **Everywhere, at every zoom** | Symbols now show from the whole-globe view, where the most important items are shown first, down to street level. They also appear next to layer names, in hover cards, in field notes and in the Live feed and ticker. Click a “+N” badge to zoom into a cluster. |
+
+<table>
+<tr>
+<td width="50%"><img src="site/docs-media/app-symbols-power.jpg" alt="European power plants drawn as nuclear trefoils, wind turbines, dams, gas flames, pump jacks and solar panels" /><br/><b>Power plants by fuel</b>, sized by capacity.</td>
+<td width="50%"><img src="site/docs-media/app-symbols-quakes.jpg" alt="Earthquakes around Japan drawn as seismogram symbols with name cards" /><br/><b>Earthquakes</b> as seismograms, sized by magnitude and coloured by depth.</td>
+</tr>
+<tr>
+<td><img src="site/docs-media/app-symbols-ships.jpg" alt="Ships in the Gulf of Finland drawn as cargo ships, tankers, ferries, sailing boats, fishing boats and tugs" /><br/><b>Ships by type</b> from their AIS type code (test data).</td>
+<td><img src="site/docs-media/app-symbols-legend.jpg" alt="The Natural events Learn card with its key of symbols" /><br/><b>Every layer has a key.</b> Click a symbol to filter.</td>
+</tr>
+</table>
+
+---
+
 ## ✈ New in v1.7 — live flights everywhere, a smoother globe, and the Moon
 
 | | |

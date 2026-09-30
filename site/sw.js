@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Terra Atlas service worker: the site itself works offline; live feeds and map tiles always go to the network.
-const VERSION = 'terra-atlas-v1.7';
+const VERSION = 'terra-atlas-v1.8';
 const SHELL = [
   './', 'app/', 'app/css/atlas.css', 'app/vendor/vendor.min.mjs',
   'app/js/main.js', 'app/js/layers.js', 'app/js/flights.js', 'app/js/cameras.js', 'app/js/places.js', 'app/js/nav.js', 'app/js/icons.js', 'app/js/news.js', 'app/js/crime.js', 'app/js/live.js', 'app/js/networks.js', 'app/js/hud.js', 'app/js/markers.js', 'app/js/perf.js', 'app/js/clock.js', 'app/js/launches.js', 'app/js/trace.js', 'app/js/wind.js', 'app/js/feeds.js', 'app/js/astro.js', 'app/js/satellites.js', 'app/js/sources.js', 'app/js/tours.js', 'app/js/quiz.js', 'app/js/moon.js', 'app/js/extras.js', 'app/config.json',
