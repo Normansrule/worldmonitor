@@ -9,6 +9,8 @@ import { getFeed, getLocal } from './feeds.js';
 import * as astro from './astro.js';
 import { SOURCES } from './sources.js';
 import { TOURS } from './tours.js';
+import { moonLayer } from './moon.js';
+import { installExtras } from './extras.js';
 import { Quiz, buildQuestionPool } from './quiz.js';
 import { flightsLayer, flightState, layoutPlanes, deckAction } from './flights.js';
 import { camerasLayer, alprLayer, stopCameraMedia, alprRow } from './cameras.js';
@@ -21,13 +23,13 @@ import { openWall } from './cameras.js';
 import { powerLayer, internetLayer, radioLayer, shipsLayer, overlayLayer } from './networks.js';
 import { installHud } from './hud.js';
 import { MarkerRenderer, GeoIndex, iconsReady } from './markers.js';
-import { installPerformance, installProgramKeeper } from './perf.js';
+import { installPerformance, installProgramKeeper, installIdleGovernor } from './perf.js';
 import { clock, SPEEDS, speedLabel } from './clock.js';
 import { launchesLayer, alertsLayer, countdown } from './launches.js';
 import { installTrace } from './trace.js';
 import { windLayer } from './wind.js';
 import { smallCircle } from './astro.js';
-export const VERSION = '1.6';
+export const VERSION = '1.7';
 const NEW_VERSION = (() => { try { return localStorage.getItem('terra-atlas-version') !== VERSION; } catch { return false; } })();
 
 import { ICONS } from './icons.js';
@@ -63,12 +65,15 @@ const TEX = {
   bluemarble: { img: 'textures/earth-blue-marble.jpg', bump: 'textures/earth-topology.png', attr: 'NASA Blue Marble, relief from three-globe' },
   night: { img: 'textures/earth-night.jpg', attr: 'NASA Black Marble city lights' },
 };
-let markers = null; let keeper = null;
+let markers = null; let keeper = null; let gov = null;
 let perf = { q: { pins: 140, pinsPerLayer: 40, cards: 24, labels: 120, columns: 30000 }, moving() {} };
 readHash();
 
 // ------------------------------------------------------------------ globe
-const globe = new Globe($('#globe'), { rendererConfig: { antialias: true, preserveDrawingBuffer: true }, animateIn: false });
+const globe = new Globe($('#globe'), { rendererConfig: { antialias: true, powerPreference: 'high-performance' }, animateIn: false });
+// Don't block on shader error checks: three.js otherwise waits for every shader to finish compiling the
+// moment it is created (seconds on some Windows/ANGLE and Linux drivers). Errors still show with ?debug.
+globe.renderer().debug.checkShaderErrors = new URLSearchParams(location.search).has('debug');
 const defaultMaterial = globe.globeMaterial();
 const loader = new THREE.TextureLoader();
 const dayNightMaterial = new THREE.ShaderMaterial({
@@ -266,11 +271,11 @@ async function refreshLayer(id, { soft = false } = {}) {
     state.chan[id] = l.channels(data, ctx());
     state.loadedAt[id] = Date.now();
     const snap = data && (data.snapshot || Object.values(data).some?.((g) => g?.snapshot));
-    setLStatus(id, 'ok', snap ? 'Live source unreachable — showing the bundled snapshot' : '');
+    setLStatus(id, 'ok', data?.statusNote ?? (snap ? 'Live source unreachable — showing the bundled snapshot' : ''));
   } catch (err) {
     console.warn(err);
     state.loadedAt[id] = Date.now(); // back off until the layer's next refresh
-    setLStatus(id, 'error', `Could not load: ${err.message}. The source may be down or blocked by your network; try again later.`);
+    setLStatus(id, 'error', err.help ?? `Could not load: ${err.message}. The source may be down or blocked by your network; try again later.`);
   }
   compose();
 }
@@ -325,6 +330,8 @@ function compose() {
     for (const k of Object.keys(acc)) if (ch[k]) acc[k].push(...ch[k]);
   }
   for (const k of Object.keys(state.tool)) acc[k].push(...state.tool[k]);
+  compose.animating = acc.rings.length > 0 || acc.particles.length > 0 || acc.arcs.some((a) => a.animMs) || acc.paths.some((p) => p.animMs);
+  gov?.wake(500);
   document.body.classList.toggle('close', state.pov.altitude < 0.025);
   // Only hand globe.gl the channels whose contents actually changed — re-digesting
   // unchanged paths/polygons every tick is what makes globes stutter.
@@ -450,6 +457,8 @@ function setLStatus(id, s, note = '') {
   if (s !== 'loading') setTimeout(() => updateCount(id), 0);
   const dot = document.querySelector(`[data-status="${id}"]`);
   if (dot) { dot.dataset.s = s; dot.title = note || (s === 'ok' ? 'Loaded' : s === 'loading' ? 'Loading…' : ''); }
+  const ln = document.querySelector(`[data-lnote="${id}"]`);
+  if (ln) { ln.textContent = note; ln.dataset.s = s; ln.hidden = !note || !state.on.has(id) || s === 'loading'; }
 }
 const PRESETS = [
   ['Connected planet', ['sun', 'borders', 'cities', 'cables', 'internet', 'power', 'aircraft', 'ships', 'radio', 'stations', 'satellites']],
@@ -476,6 +485,7 @@ function renderLayerPanel() {
           <span class="st" data-status="${l.id}" data-s="${state.lstatus[l.id]?.s ?? ''}"></span>
           <button class="learn" data-learn="${l.id}" aria-label="Learn about ${esc(l.label)}">Learn</button>
           ${(l.options ?? []).map((o) => optionHtml(l, o)).join('')}
+          <p class="lnote" data-lnote="${l.id}" data-s="${state.lstatus[l.id]?.s ?? ''}" ${state.on.has(l.id) && state.lstatus[l.id]?.note && state.lstatus[l.id]?.s !== 'loading' ? '' : 'hidden'}>${esc(state.lstatus[l.id]?.note ?? '')}</p>
         </div>`).join('')}
     </section>`).join('');
   $('#layer-list').innerHTML = html;
@@ -585,6 +595,7 @@ async function wikiCard(title, key) {
 }
 async function runAction(kind) {
   const ref = state.selected; const out = $('#sel-action');
+  if (kind === 'ride') return extras?.ride(true);
   if (kind === 'orbit' && ref?.d?.sat) { orbitOf.sat = ref.d.sat; orbitOf.snapshot = ref.d.snapshot; toggleLayer('satellites', true); refreshLayer('satellites', { soft: true }); if (out) out.innerHTML = '<p class="muted">Orbit drawn in violet — one full revolution from now.</p>'; }
   if (kind === 'passes' && ref?.d?.sat) {
     if (ref.d.snapshot) { out.innerHTML = '<p class="err">Pass predictions need live orbital elements, and CelesTrak is unreachable right now.</p>'; return; }
@@ -629,6 +640,8 @@ function showLearn(id) {
     ${state.on.has(id) ? '' : `<p><button class="btn" data-enable="${id}">Show this layer</button></p>`}
     ${id === 'alpr' ? '<p><button class="btn ghost" data-alpr-live="1">Load the latest for this area from OpenStreetMap</button></p>' : ''}
     ${id === 'cameras' ? '<p><button class="btn" data-wall="1">Open the camera wall for this view</button></p>' : ''}
+    ${id === 'aircraft' ? '<p><button class="btn" data-board="1">Open the flights board</button></p>' : ''}
+    ${id === 'stations' ? '<p><button class="btn" data-ride="on">Ride along with the ISS</button></p>' : ''}
     <h4>Sources and further reading</h4>${refsHtml(l.learn.refs)}`);
 }
 $('#notes-body').addEventListener('click', (e) => {
@@ -643,6 +656,7 @@ $('#notes-body').addEventListener('click', (e) => {
   if (t.id === 'quiz-next') nextQuestion();
   if (t.dataset.fly) { const [a, b, c] = t.dataset.fly.split(',').map(Number); fly(a, b, c); }
   if (t.dataset.action) runAction(t.dataset.action);
+  if (t.dataset.board) extras?.flightsBoard();
   if (t.dataset.deck) deckAction(t.dataset.deck, api);
   if (t.dataset.cam) { const c = state.data.cameras?.cams.find((x) => x.id === t.dataset.cam); if (c) { select({ layer: 'cameras', d: c }); fly(c.lat, c.lng, Math.min(state.pov.altitude, 0.02)); } }
   if (t.dataset.alprLive) layerById.alpr.fetchLive(viewOf(state.pov)).then((n) => { t.textContent = `Loaded ${n} from OpenStreetMap`; refreshLayer('alpr'); }).catch(() => { t.textContent = 'Overpass did not respond — try again shortly'; });
@@ -1152,6 +1166,7 @@ $('#spin').addEventListener('click', toggleSpin);
 function toggleSpin() { controls.autoRotate = !controls.autoRotate; $('#spin').setAttribute('aria-pressed', String(controls.autoRotate)); }
 $('#shot').addEventListener('click', () => {
   const a = document.createElement('a');
+  gov?.renderNow(); // the drawing buffer isn't preserved (faster), so draw a fresh frame and read it straight away
   a.href = globe.renderer().domElement.toDataURL('image/png');
   a.download = `terra-atlas-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}.png`; a.click();
 });
@@ -1179,7 +1194,7 @@ function setLook(look) {
 }
 document.querySelectorAll('[data-look]').forEach((b) => b.addEventListener('click', () => setLook(b.dataset.look)));
 document.addEventListener('keydown', (e) => { if (!e.target.matches('input, select, textarea') && /^[1-5]$/.test(e.key)) setLook(LOOKS[Number(e.key) - 1]); });
-let hud = null; let tracer = null;
+let hud = null; let tracer = null; let extras = null;
 $('#gibs-date-input').max = new Date(Date.now() - 24 * 3600_000).toISOString().slice(0, 10);
 $('#gibs-date-input').value = gibsDate();
 $('#gibs-date-input').addEventListener('change', (e) => { state.gibsDate = e.target.value || null; applyBase(); });
@@ -1194,9 +1209,9 @@ const api = { now: () => clock.date(), view: () => viewOf(state.pov), particleBu
   add(newsLayer, 'aircraft'); add(crimeLayer, 'alpr');
   add(shipsLayer, 'news'); add(radioLayer, 'alpr'); add(overlayLayer(api), 'satellites');
   add(internetLayer, 'cables'); add(powerLayer, 'nuclear');
-  add(launchesLayer, 'stations'); add(alertsLayer, 'events'); add(windLayer(api), 'grid');
+  add(launchesLayer, 'stations'); add(alertsLayer, 'events'); add(windLayer(api), 'grid'); add(moonLayer, 'sun');
   crimeLayer.group = 'civic';
-  for (const id of ['aircraft', 'news', 'cameras', 'alpr', 'crime', 'cities', 'airports']) layerById[id].fresh = true;
+  for (const l of LAYERS) l.fresh = ['aircraft', 'moon'].includes(l.id); // the “new” badge marks what changed in this version
   layerById.aircraft.on = true; layerById.cameras.on = true;
   GROUPS.splice(1, 0, { id: 'cams', label: 'Cameras' });
   GROUPS.splice(3, 0, { id: 'places', label: 'Places' });
@@ -1226,15 +1241,37 @@ $('#apply-now').addEventListener('click', applyPending);
 $('#apply-undo').addEventListener('click', () => { state.pending.clear(); renderLayerPanel(); });
 const live = installLive(api);
 tracer = installTrace(api);
+extras = installExtras({
+  ...api, LAYERS, PRESETS, TOURS, toggleLayer, renderLayerPanel, showLearn, preset, countryAt, geocode, fly,
+  startTour: (id) => { if (state.mode !== 'tours') setMode('tours'); startTour(id); },
+  start: (k) => { const b = document.createElement('button'); b.dataset.start = k; b.hidden = true; document.body.appendChild(b); b.click(); b.remove(); },
+  trace: () => { setMode('trace'); tracer.trace(state.pov.lat, state.pov.lng); },
+  whatsNew: () => whatsNew(), layer: (id) => layerById[id], solarElevation: astro.solarElevation,
+});
+$('#pal-open').addEventListener('click', () => extras.open());
 // Live countdowns in any open card
 setInterval(() => document.querySelectorAll('.countdown[data-net]').forEach((el) => { el.textContent = countdown(Number(el.dataset.net) - Date.now()); }), 1000);
 perf = installPerformance({ globe, $, toast: (m) => toast(m), onChange: () => { compose.forceMarkers = true; scheduleCompose(); } });
+gov = installIdleGovernor(globe, {
+  busy: () => controls.autoRotate || !!state.tour || flightState.follow || !!state.ride,
+  animating: () => compose.animating || state.on.has('wind') || !clock.isLive(),
+});
 hud = installHud(api);
 if (state.look === 'hud') hud.show(true);
 if (NEW_VERSION) { setTimeout(whatsNew, 600); try { localStorage.setItem('terra-atlas-version', VERSION); } catch { /* private mode */ } }
 else if (!location.hash.includes('@') && !isMobile) welcome();
 function whatsNew() {
-  openNotes(`What’s new in v${VERSION}`, `<h3>Time and connections</h3>
+  openNotes(`What’s new in v${VERSION}`, `<h3>Live flights everywhere, a smoother globe, and the Moon</h3>
+    <p class="sub">Press <kbd>Ctrl</kbd>+<kbd>K</kbd> (or the ⌘K button at the top) to find anything, then try these:</p>
+    <div class="starts">
+      <button class="tour-card" data-start="flights"><b>✈ Live flights that actually load</b><span>Browsers block flight trackers, so the website now reads a worldwide snapshot refreshed every 10 minutes and moves each plane forward along its heading. The desktop app reads them live.</span></button>
+      <button class="tour-card" data-start="board"><b>▦ Flights board</b><span>How many planes are up, height bands, the fastest (jet-stream riders), the highest, and any emergency squawks. Click one to open its seatback view.</span></button>
+      <button class="tour-card" data-start="ride"><b>🛰 Ride along with the ISS</b><span>The camera follows the space station at 27,600 km/h, telling you which country or ocean it is over and whether it is day or night below.</span></button>
+      <button class="tour-card" data-start="moon"><b>🌔 Moon and tides</b><span>Where the Moon is overhead right now, its phase, the next full moon, and the two tidal bulges.</span></button>
+      <button class="tour-card" data-start="palette"><b>⌘ Command palette and saved views</b><span>Every layer, preset, tour, base map, 2,500 cities and your own bookmarked views, one keystroke away.</span></button>
+    </div>
+    <p class="muted">Faster too: the globe stops redrawing when nothing moves (dropping to 5 frames a second while still, full speed the moment you touch it), shaders no longer block start-up, and every layer now shows in plain words where its data came from.</p>
+    <h4>From v1.6 — time and connections</h4>
     <p class="sub">Click the clock at the bottom for the time machine, press C to trace any place, and look for these:</p>
     <div class="starts">
       <button class="tour-card" data-start="replay"><b>⏱ Replay a week of earthquakes</b><span>The time machine runs the planet at one hour per second — the Sun, satellites and the ISS move with it.</span></button>
@@ -1284,6 +1321,10 @@ document.addEventListener('click', (e) => {
   if (k === 'cams') { setLayers(['borders', 'cities', 'cameras', 'alpr']); globe.pointOfView({ lat: 34.05, lng: -118.25, altitude: 0.05 }, 2000); showLearn('cameras'); setTimeout(() => api.openWall(), 3500); }
   if (k === 'news') { setLayers(['sun', 'borders', 'cities', 'news']); globe.pointOfView({ lat: 25, lng: 20, altitude: 2.3 }, 1800); showLearn('news'); }
   if (k === 'crime') { setLayers(['borders', 'cities', 'crime']); globe.pointOfView({ lat: 41.88, lng: -87.66, altitude: 0.03 }, 2000); setTimeout(() => showLearn('crime'), 2600); }
+  if (k === 'board') { if (!state.on.has('aircraft')) setLayers([...state.on, 'aircraft']); setTimeout(() => extras.flightsBoard(), state.data.aircraft ? 0 : 4000); }
+  if (k === 'ride') { if (!state.on.has('stations')) setLayers([...state.on, 'stations']); setTimeout(() => extras.ride(true), state.data.stations ? 0 : 2500); }
+  if (k === 'moon') { setLayers(['sun', 'borders', 'cities', 'moon']); const m = astro.moonState(clock.date()); globe.pointOfView({ lat: m.lat, lng: m.lng, altitude: 2.4 }, 1800); showLearn('moon'); }
+  if (k === 'palette') extras.open();
   if (k === 'live') { setLayers(['sun', 'borders', 'cities', 'quakes', 'events', 'news', 'aircraft']); setTimeout(() => document.querySelector('[data-livetour]')?.click() ?? live.openFeed(), 300); live.openFeed(); }
 });
 function welcome() {
@@ -1305,4 +1346,4 @@ if (window.__TAURI_INTERNALS__) {
     if (a && new URL(a.href).origin !== location.origin) { e.preventDefault(); window.__TAURI_INTERNALS__.invoke('plugin:opener|open_url', { url: a.href }); }
   });
 }
-window.terraAtlas = { tracer: () => tracer, markers, pickAt: (x, y) => pickAt(x, y), live, applyPending, preset, VERSION, globe, state, setBase, toggleLayer, startTour, setMode, select, showLearn, surfaceClick, countryAt, setLook, refreshLayer, flightState }; // for tinkering in the console
+window.terraAtlas = { gov: () => gov, extras: () => extras, tracer: () => tracer, markers, pickAt: (x, y) => pickAt(x, y), live, applyPending, preset, VERSION, globe, state, setBase, toggleLayer, startTour, setMode, select, showLearn, surfaceClick, countryAt, setLook, refreshLayer, flightState }; // for tinkering in the console

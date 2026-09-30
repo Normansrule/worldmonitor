@@ -42,7 +42,7 @@ export async function loadGroup(group) {
   if (loaded[group]) return loaded[group];
   const g = SAT_GROUPS[group];
   try {
-    const txt = await getFeed(`celestrak:${group}`, `https://celestrak.org/NORAD/elements/gp.php?GROUP=${g.celestrak}&FORMAT=tle`, { type: 'text', ttl: 3 * 3600_000 });
+    const txt = await getFeed(`celestrak:${group}`, `https://celestrak.org/NORAD/elements/gp.php?GROUP=${g.celestrak}&FORMAT=tle`, { type: 'text', ttl: 3 * 3600_000, snapshot: `tle-${g.celestrak}.txt` });
     const sats = parseTle(txt, group === 'starlink' ? 9000 : 2000);
     if (!sats.length) throw new Error('empty TLE set');
     loaded[group] = { sats, snapshot: false };

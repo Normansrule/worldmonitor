@@ -1,0 +1,53 @@
+# Terra Atlas: the live-data snapshot.
+# Every ~10 minutes, fetch the feeds that browsers may not read directly (flights, and fallbacks for
+# launches, disaster alerts and satellite orbits) and force-push them as ONE commit to the orphan branch
+# `live-data`. The site reads them from raw.githubusercontent.com, which sends CORS headers.
+# The branch never grows: every run replaces it.
+#
+# Optional, for a better flight feed: add repository secrets OPENSKY_CLIENT_ID and OPENSKY_CLIENT_SECRET
+# (free OpenSky account → Account → API client). Without them the job uses anonymous OpenSky or the
+# community ADS-B exchanges.
+name: Live data snapshot
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: live-data
+  cancel-in-progress: false
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: tools
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Previous snapshot (keeps slow feeds such as orbits between runs)
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: git clone --quiet --depth 1 --branch live-data "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" live || mkdir -p live
+      - name: Fetch
+        env:
+          OPENSKY_CLIENT_ID: ${{ secrets.OPENSKY_CLIENT_ID }}
+          OPENSKY_CLIENT_SECRET: ${{ secrets.OPENSKY_CLIENT_SECRET }}
+        run: node tools/fetch-live.mjs live
+      - name: Publish to the live-data branch
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd live
+          rm -rf .git
+          git init --quiet
+          git checkout --quiet --orphan live-data
+          git config user.name "terra-atlas-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit --quiet -m "live snapshot $(date -u +%FT%TZ)"
+          git push --quiet --force "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" live-data
+          ls -la

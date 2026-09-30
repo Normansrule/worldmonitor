@@ -75,3 +75,40 @@ export function installProgramKeeper(globe) {
   }
   return { schedule() { if (!pending) { pending = true; setTimeout(sweep, 1500); } }, size: () => kept.size };
 }
+
+/**
+ * Idle render governor. globe.gl redraws the whole scene 60 times a second even when nothing on
+ * screen changes, which keeps the GPU busy, drains laptop batteries and steals main-thread time
+ * from data loading. While you interact (and for 2.5 s after), frames are drawn at full rate.
+ * After that it drops to 30 fps if something is animating (pulsing rings, dashes, wind, a running
+ * time machine) and to 5 fps if the picture is still. Skipped frames cost nothing: the browser
+ * keeps showing the last one. Any input, camera flight or data update wakes it instantly.
+ * @param {{ animating: () => boolean, busy: () => boolean }} hooks
+ */
+export function installIdleGovernor(globe, { animating, busy }) {
+  const renderer = globe.renderer(); const orig = renderer.render.bind(renderer);
+  let awakeUntil = performance.now() + 5000; let last = 0; let skipped = 0; let drawn = 0;
+  const off = new URLSearchParams(location.search).has('nogovernor');
+  const wake = (ms = 2500) => { awakeUntil = Math.max(awakeUntil, performance.now() + ms); };
+  renderer.render = (scene, camera) => {
+    const now = performance.now();
+    if (!off && now > awakeUntil && renderer.getRenderTarget() === null && !busy()) {
+      const gap = animating() ? 1000 / 30 - 2 : 1000 / 5 - 2;
+      if (now - last < gap) { skipped += 1; return; }
+    }
+    last = now; drawn += 1; orig(scene, camera);
+  };
+  const el = renderer.domElement;
+  for (const ev of ['pointerdown', 'pointermove', 'wheel', 'touchstart', 'touchmove']) el.addEventListener(ev, () => wake(), { passive: true });
+  for (const ev of ['keydown', 'resize']) addEventListener(ev, () => wake());
+  document.addEventListener('visibilitychange', () => wake());
+  // Camera flights run inside the render loop, so a programmatic fly-to wakes it for its whole length.
+  const pov = globe.pointOfView.bind(globe);
+  globe.pointOfView = (...a) => { if (a.length && a[0]) wake((a[1] ?? 0) + 800); return pov(...a); };
+  return {
+    wake,
+    /** Draw right now, whatever the governor says (for screenshots). */
+    renderNow() { orig(globe.scene(), globe.camera()); },
+    stats: () => ({ drawn, skipped, idle: performance.now() > awakeUntil }),
+  };
+}

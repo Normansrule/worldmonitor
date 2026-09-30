@@ -23,6 +23,41 @@ Built on [World Monitor](https://github.com/koala73/worldmonitor) by Elie Habib.
 
 ---
 
+## ✈ New in v1.7 — live flights everywhere, a smoother globe, and the Moon
+
+| | |
+|---|---|
+| **Live flights that actually load** | Flight trackers (OpenSky, airplanes.live, adsb.lol, adsb.fi) don’t send the Cross-Origin Resource Sharing (CORS) headers that browsers require, so a web page can’t read them and in v1.6 planes often never appeared. Now there are three routes. **(1) Website:** a GitHub Actions job (`.github/workflows/live.yml` + `tools/fetch-live.mjs`) fetches every aircraft worldwide every ~10 minutes and force-pushes it as one commit to an orphan `live-data` branch, which `raw.githubusercontent.com` serves with CORS headers. Your browser then moves each plane forward along its heading at its ground speed until the next snapshot (dead reckoning). **(2) Desktop app:** a native Rust command (`fetch_text`, allowlisted hosts only) reads OpenSky every 90 s and the regional exchanges every few seconds, fully live. **(3) Optional:** a 60-line Cloudflare Worker in `proxy/` gives the website real-time flights as well. |
+| **Every layer says where its data came from** | Under each layer, in plain words: “4,000 aircraft from the live-data snapshot (7 min old, positions projected forward)”, or exactly what to do when a source is down. Launches, disaster alerts and satellite orbits now fall back to the same snapshot when their live source is blocked or rate-limited. |
+| **Flights board** | How many aircraft are up and on the ground, height bands, the fastest (usually riding a jet stream), the highest, and any emergency squawks; click one for its seatback view. |
+| **Ride along with the ISS** | The camera follows the space station, showing which country or ocean it is over, its height and speed, and whether it is day or night below. Zoom freely while riding; grab the globe to stop. |
+| **Moon and tides** | Where the Moon is straight overhead right now, its phase and distance, the next new, quarter and full moons, the moonrise/moonset line, and the two tidal bulges (low-precision Astronomical Almanac formulas, about 0.3° accurate). |
+| **Command palette (Ctrl+K / ⌘K)** | Type to find any of 45 layers, presets, tours, base maps, looks, 2,500 cities, actions, and your own **saved views** (camera + base map + layers, kept in your browser). |
+| **Smoother and lighter** | An idle render governor draws at full speed while you interact, 30 fps when only something is animating, and 5 fps when the picture is still, so the GPU and fans rest and the main thread is free for data. Shader error checks no longer block start-up (13.5 s → 5.6 s of start-up long tasks on a software renderer), the drawing buffer is no longer preserved every frame, and the desktop app asks WebView2 for GPU rasterisation. |
+
+<table>
+<tr>
+<td width="50%"><img src="site/docs-media/app-ride.jpg" alt="Riding with the ISS over the Great Lakes with thousands of aircraft below" /><br/><b>Ride along with the ISS</b>, with live flights underneath.</td>
+<td width="50%"><img src="site/docs-media/app-moon.jpg" alt="The Moon and tides layer with the phase card and the moonrise line" /><br/><b>Moon and tides</b> — phase, distance and the next full moon.</td>
+</tr>
+<tr>
+<td><img src="site/docs-media/app-palette.jpg" alt="The command palette searching for moon" /><br/><b>Command palette</b> — Ctrl+K from anywhere.</td>
+<td><img src="site/docs-media/app-flights-board.jpg" alt="The flights board with height bands and the fastest aircraft" /><br/><b>Flights board</b> (screenshot uses test data).</td>
+</tr>
+</table>
+
+```mermaid
+flowchart LR
+  subgraph GH[GitHub Actions, every ~10 min]
+    F[tools/fetch-live.mjs] -->|OpenSky / airplanes.live / adsb.lol| B[(live-data branch)]
+  end
+  B -->|raw.githubusercontent.com + CORS| W[Website: snapshot + dead reckoning]
+  D[Desktop app: Rust fetch_text] -->|live every 5–90 s| DA[Desktop globe]
+  P[Optional Cloudflare Worker proxy/] -->|live + CORS| W
+```
+
+---
+
 ## ⏱ New in v1.6 — time and connections
 
 | | |
@@ -289,6 +324,21 @@ git add -A && git commit -m "Add Terra Atlas: static site, desktop app, docs" &&
 
 Then **Settings → Pages → Source: GitHub Actions**. The [`pages.yml`](.github/workflows/pages.yml) workflow publishes `site/` on every push.
 
+**Live flights and other blocked feeds** (added in v1.7). The [`live.yml`](.github/workflows/live.yml) workflow writes the `live-data` branch every ~10 minutes and creates it on its first run: **Actions → Live data snapshot → Run workflow**. Scheduled workflows on forks start switched off, so open the Actions tab once and enable them. Two optional upgrades:
+
+```bash
+# 1. A better flight feed for the snapshot: create a free OpenSky account → Account → "API client",
+#    then add its id and secret as repository secrets (GitHub asks for the values):
+gh secret set OPENSKY_CLIENT_ID     --repo Normansrule/worldmonitor
+gh secret set OPENSKY_CLIENT_SECRET --repo Normansrule/worldmonitor
+
+# 2. Real-time flights on the website too: deploy the tiny Cloudflare Worker (free plan)
+cd proxy && npx wrangler login && npx wrangler deploy
+# then put the printed https://terra-atlas-proxy.<you>.workers.dev URL into site/app/config.json → "proxy"
+```
+
+The desktop app needs none of this: it fetches live flights natively.
+
 **Refresh World Monitor’s data** after pulling upstream:
 
 ```bash
@@ -321,7 +371,7 @@ flowchart LR
       GB["NASA GIBS tiles"]:::l
       N["NOAA SWPC"]:::l
       CT["CelesTrak"]:::l
-      AD["adsb.lol / OpenSky"]:::l
+      AD["Flights: live-data snapshot (web) · OpenSky / airplanes.live / adsb.lol (desktop, proxy)"]:::l
       OM["Open-Meteo · REST Countries · World Bank · Wikipedia · Nominatim"]:::l
     end
     Bundled --> L["layers.js<br/>load → channels"]

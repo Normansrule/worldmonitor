@@ -65,6 +65,8 @@ a:hover { color: var(--paper); }
 .layer input:checked + .sw { background: var(--sw); }
 .layer input:focus-visible + .sw { outline: 2px solid var(--brass); outline-offset: 2px; }
 .layer label { cursor: pointer; }
+.layer .lnote { grid-column: 2 / -1; margin: 0; font-size: 11.5px; line-height: 1.4; color: var(--muted, #9fb0bd); }
+.layer .lnote[data-s='error'] { color: #ffb3a6; }
 .layer .st { width: 7px; height: 7px; border-radius: 50%; background: transparent; }
 .layer .st[data-s='loading'] { background: var(--brass); animation: blink 1s infinite; }
 .layer .st[data-s='ok'] { background: var(--seaglass); }
@@ -355,3 +357,33 @@ body.timetravel #globe { box-shadow: inset 0 0 0 3px rgba(227, 181, 91, 0.55); }
 .trace-list button:hover b { color: var(--c); }
 .trace-list b { display: block; font-size: 14px; }
 .trace-list small { color: var(--mist); font-size: 12.5px; }
+
+/* ---------- v1.7: command palette, ISS ride chip, flights board, saved views ---------- */
+.modes .palb { font-variant-numeric: tabular-nums; border: 1px solid var(--rule); border-radius: var(--r-ctl); }
+.modes .palb span { color: var(--mist); }
+@media (max-width: 1180px) { .modes .palb span { display: none; } }
+#palette { position: fixed; inset: 0; z-index: 60; background: rgba(4, 12, 20, 0.55); backdrop-filter: blur(3px); display: flex; justify-content: center; align-items: flex-start; padding: 12vh 16px 16px; }
+#palette[hidden] { display: none; }
+.pal-card { width: min(640px, 100%); background: var(--chart); border: 1px solid var(--rule); border-radius: var(--r-panel); box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5); overflow: hidden; }
+#pal-q { width: 100%; border: 0; border-bottom: 1px solid var(--rule); background: transparent; padding: 16px 18px; font-size: 18px; outline: none; }
+#pal-list { list-style: none; margin: 0; padding: 6px; max-height: min(52vh, 460px); overflow: auto; }
+#pal-list li { display: grid; grid-template-columns: 92px 1fr; gap: 2px 10px; padding: 8px 10px; border-radius: 10px; cursor: pointer; align-items: baseline; }
+#pal-list li[aria-selected='true'], #pal-list li:hover { background: var(--brass-dim); }
+#pal-list li small { grid-column: 2; color: var(--mist); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pal-list .pal-g { color: var(--brass); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; }
+#pal-list .pal-empty { display: block; color: var(--mist); cursor: default; }
+.pal-foot { margin: 0; padding: 8px 14px; border-top: 1px solid var(--rule); color: var(--mist); font-size: 12px; }
+kbd { font: 600 11.5px/1 var(--body); border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 5px; padding: 2px 5px; margin: 0 2px; background: var(--abyss); color: var(--paper); }
+#ride { position: fixed; left: 50%; top: 122px; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; background: var(--chart-a); border: 1px solid var(--brass); border-radius: 14px; backdrop-filter: blur(8px); max-width: calc(100vw - 32px); }
+#ride[hidden] { display: none; }
+#ride b { display: block; font: 700 15px/1.2 var(--display); color: var(--brass); }
+#ride small { color: var(--paper); font-variant-numeric: tabular-nums; }
+.ride-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--brass); box-shadow: 0 0 0 0 rgba(227, 181, 91, 0.7); animation: ridepulse 1.6s infinite; flex: none; }
+@keyframes ridepulse { to { box-shadow: 0 0 0 12px rgba(227, 181, 91, 0); } }
+.bars { display: grid; gap: 6px; margin: 6px 0 12px; }
+.bar { display: grid; grid-template-columns: 130px 1fr 56px; align-items: center; gap: 8px; font-size: 13px; }
+.bar span { color: var(--mist); }
+.bar i { display: block; height: 10px; border-radius: 5px; min-width: 2px; }
+.bar b { text-align: right; font-variant-numeric: tabular-nums; }
+.viewrow { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start; }
+@media (prefers-reduced-motion: reduce) { .ride-dot { animation: none; } }

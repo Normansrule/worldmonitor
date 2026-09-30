@@ -16,7 +16,7 @@ for (let k = 0; k < pts.length; k += 100) {
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${chunk.map((p) => p[0]).join(',')}&longitude=${chunk.map((p) => p[1]).join(',')}&current=wind_speed_10m,wind_direction_10m,temperature_2m&wind_speed_unit=ms`;
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
-      const r = await fetch(url, { headers: { 'User-Agent': 'TerraAtlas/1.6 (educational map)' }, signal: AbortSignal.timeout(60_000) });
+      const r = await fetch(url, { headers: { 'User-Agent': 'TerraAtlas/1.7 (educational map)' }, signal: AbortSignal.timeout(60_000) });
       if (r.status === 429) { await sleep(20_000 * (attempt + 1)); continue; }
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json(); const arr = Array.isArray(j) ? j : [j];

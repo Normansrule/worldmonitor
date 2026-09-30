@@ -218,7 +218,7 @@ export const LAYERS = [
           ['Orbital period', `${per.toFixed(1)} min — ${(1440 / per).toFixed(1)} orbits a day`], ['NORAD id', p.norad], ['Position', `${fmtLat(p.lat)}, ${fmtLng(p.lng)}`]],
         body: 'At this height the station is still inside a thin trace of atmosphere, so drag slowly lowers its orbit and it needs periodic re-boosts. The yellow line is its ground track: the orbit stays fixed in space while Earth turns underneath, so each pass shifts about 23° west.',
         links: [{ label: 'NASA — Spot the Station', url: 'https://spotthestation.nasa.gov' }, wiki(p.name)],
-        actions: [['passes', 'When can I see it from here?'], ['orbit', 'Show its full orbit'], ['footprint', 'What can it see right now?']],
+        actions: [['passes', 'When can I see it from here?'], ['orbit', 'Show its full orbit'], ['footprint', 'What can it see right now?'], ...(/ISS/.test(p.name) ? [['ride', 'Ride along with the ISS']] : [])],
       };
     },
     learn: {

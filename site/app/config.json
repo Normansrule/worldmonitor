@@ -1,0 +1,6 @@
+{
+  "_help": "liveData: where the 10-minute live-data snapshot branch is served from. 'auto' works it out on *.github.io. liveDataFallback is used everywhere else (desktop app, localhost). proxy: optional URL of your Cloudflare Worker from proxy/ (e.g. https://terra-atlas-proxy.<you>.workers.dev) for real-time flights on the web.",
+  "liveData": "auto",
+  "liveDataFallback": "https://raw.githubusercontent.com/Normansrule/worldmonitor/live-data/",
+  "proxy": ""
+}

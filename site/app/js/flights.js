@@ -6,14 +6,13 @@
 // temperature, route progress, time to go, weather at the destination and a photo of the aircraft.
 
 import { THREE } from '../vendor/vendor.min.mjs';
-import { getFeed } from './feeds.js';
+import { getFeed, getSnapshot, isDesktop, liveProxy, viaOf, feedsReady } from './feeds.js';
 import { haversineKm, greatCirclePoints, fmtLat, fmtLng, localSolarTime } from './astro.js';
 
 const R = 100;
 const MAX = 20000;
 const history = new Map(); // icao -> [[lat, lng, altFt, t], ...]
 let mesh = null; let lastList = []; const WRAP = { obj: null }; // one stable datum, so globe.gl never swaps (and removes) the shared mesh
-let worldCache = null; let worldAt = 0;
 export const flightState = { selected: null, follow: false, route: {} };
 
 // --------------------------------------------------------------- data
@@ -33,24 +32,82 @@ function fromOpenSky(j) {
   }));
 }
 
+// Rows from the live-data snapshot (tools/fetch-live.mjs), turned into the same objects as the live parsers.
+let snapRows = null; let snapKey = '';
+function fromSnapshot(j) {
+  const key = `${j.generatedAt}|${j.ac?.length}`;
+  if (snapKey === key) return snapRows;
+  const f = j.fields; const k = Object.fromEntries(f.map((n, i) => [n, i]));
+  snapRows = (j.ac ?? []).map((r) => ({ id: r[k.id], call: r[k.call] ?? '', lat0: r[k.lat], lng0: r[k.lng], lat: r[k.lat], lng: r[k.lng], altFt: r[k.altFt] ?? 0, ground: !!r[k.ground],
+    kt: r[k.kt], trk: r[k.trk] ?? 0, vs: r[k.vs], squawk: r[k.squawk] ?? undefined, type: r[k.type] ?? undefined, reg: r[k.reg] ?? undefined }));
+  snapKey = key; return snapRows;
+}
+/** Dead reckoning: move each airborne plane along its heading at its speed since the snapshot was taken. */
+function projectForward(list, ageMin) {
+  const hrs = Math.min(ageMin, 25) / 60;
+  for (const a of list) {
+    if (a.ground || !a.kt || a.kt < 50) { a.lat = a.lat0; a.lng = a.lng0; continue; }
+    const km = a.kt * 1.852 * hrs; const h = (a.trk ?? 0) * Math.PI / 180;
+    const lat = Math.max(-89, Math.min(89, a.lat0 + (km * Math.cos(h)) / 111.2));
+    let lng = a.lng0 + (km * Math.sin(h)) / (111.2 * Math.max(0.05, Math.cos(a.lat0 * Math.PI / 180)));
+    lng = ((lng + 540) % 360) - 180;
+    a.lat = Math.round(lat * 1e4) / 1e4; a.lng = Math.round(lng * 1e4) / 1e4;
+  }
+  return list;
+}
+const ago = (min) => (min < 1.5 ? 'under 2 min' : min < 90 ? `${Math.round(min)} min` : `${Math.round(min / 60)} h`);
+async function snapshotFlights() {
+  const j = await getSnapshot('livedata', 'flights.json', { ttl: 60_000 });
+  const age = (Date.now() - Date.parse(j.generatedAt)) / 60_000;
+  const ac = projectForward(fromSnapshot(j), age);
+  return {
+    src: `${j.src} · snapshot ${ago(age)} old`, ac, snapshotAge: age,
+    statusNote: `${ac.length.toLocaleString()} aircraft from the live-data snapshot (${ago(age)} old${age > 1 ? ', positions projected forward along each heading' : ''}).${age > 40 ? ' The snapshot is stale: check the “Live data snapshot” workflow on GitHub.' : ''}`,
+  };
+}
+const canReachLive = () => isDesktop || !!liveProxy();
+let regionalFailed = false; // web without proxy: after one refusal, stop asking community exchanges this session
+
+async function liveRegional(lat, lng) {
+  const la = lat.toFixed(2); const lo = lng.toFixed(2);
+  const tries = [
+    ['airplaneslive', 'airplanes.live', `https://api.airplanes.live/v2/point/${la}/${lo}/250`],
+    ['adsblol', 'adsb.lol', `https://api.adsb.lol/v2/lat/${la}/lon/${lo}/dist/250`],
+    ['adsbfi', 'adsb.fi', `https://opendata.adsb.fi/api/v2/lat/${la}/lon/${lo}/dist/250`],
+  ];
+  let last = null;
+  for (const [id, name, url] of tries) {
+    try { const ac = fromAdsbLol(await getFeed(id, url, { ttl: 8_000, timeout: 12_000 })); if (!ac.length) throw new Error(`${name}: no aircraft here`); return { src: `${name} · live, within 250 nm of view${viaOf(url) === 'proxy' ? ' (via your proxy)' : ''}`, ac, statusNote: `${ac.length.toLocaleString()} aircraft live from ${name} near the centre of the view.` }; } catch (e) { last = e; }
+  }
+  throw last;
+}
+async function liveWorld() {
+  const url = 'https://opensky-network.org/api/states/all';
+  const ac = fromOpenSky(await getFeed('opensky', url, { ttl: 85_000, timeout: 30_000 }));
+  if (ac.length < 500) throw new Error('OpenSky returned almost nothing');
+  return { src: `OpenSky Network · live, worldwide${viaOf(url) === 'proxy' ? ' (via your proxy)' : isDesktop ? ' (desktop app)' : ''}`, ac, statusNote: `${ac.length.toLocaleString()} aircraft live from the OpenSky Network, refreshed every 90 seconds.` };
+}
+
 async function loadFlights(o, ctx) {
+  await feedsReady;
   const { lat, lng } = ctx.pov;
+  const errors = [];
+  const attempt = async (fn) => { try { return await fn(); } catch (e) { errors.push(e.message); return null; } };
   let res = null;
-  if (o.scope === 'world') {
-    if (worldCache && Date.now() - worldAt < 60_000) res = worldCache; // OpenSky anonymous quota: keep it gentle
-    else {
-      try {
-        res = { src: 'OpenSky Network (worldwide)', ac: fromOpenSky(await getFeed('opensky', 'https://opensky-network.org/api/states/all', { ttl: 55_000, timeout: 25_000 })) };
-        worldCache = res; worldAt = Date.now();
-      } catch { /* fall through to regional */ }
-    }
+  if (o.scope === 'near') {
+    if (canReachLive() || !regionalFailed) { res = await attempt(() => liveRegional(lat, lng)); if (!res && !canReachLive()) regionalFailed = true; }
+    if (!res) res = await attempt(snapshotFlights);
+  } else {
+    if (canReachLive()) res = await attempt(liveWorld);
+    if (!res) res = await attempt(snapshotFlights);
+    if (!res && (canReachLive() || !regionalFailed)) { res = await attempt(() => liveRegional(lat, lng)); if (!res && !canReachLive()) regionalFailed = true; }
   }
   if (!res) {
-    try {
-      res = { src: 'adsb.lol (within 250 nm of view)', ac: fromAdsbLol(await getFeed('adsblol', `https://api.adsb.lol/v2/lat/${lat.toFixed(2)}/lon/${lng.toFixed(2)}/dist/250`, { ttl: 8_000 })) };
-    } catch {
-      res = { src: 'airplanes.live (within 250 nm of view)', ac: fromAdsbLol(await getFeed('airplaneslive', `https://api.airplanes.live/v2/point/${lat.toFixed(2)}/${lng.toFixed(2)}/250`, { ttl: 8_000 })) };
-    }
+    throw Object.assign(new Error(errors.join(' · ') || 'no flight source answered'), {
+      help: isDesktop
+        ? `No flight source answered (${errors.join('; ')}). The desktop app asks OpenSky, airplanes.live, adsb.lol and adsb.fi directly, so check your internet connection or firewall; it retries every few seconds.`
+        : `No flight source answered (${errors.join('; ')}). Browsers block direct requests to flight trackers (they send no CORS headers), so the website reads a snapshot that GitHub Actions rebuilds every 10 minutes. If you run your own copy: GitHub → Actions → “Live data snapshot” → Run workflow, then reload. Or use the desktop app, which reads flights live.`,
+    });
   }
   const now = Date.now();
   for (const a of res.ac) {
@@ -60,6 +117,7 @@ async function loadFlights(o, ctx) {
     if (h.length > 60) h.shift();
     history.set(a.id, h);
   }
+  if (history.size > 60000) for (const k of [...history.keys()].slice(0, 20000)) history.delete(k);
   return res;
 }
 
@@ -128,7 +186,7 @@ const isaTempC = (ft) => { const km = ft / 3281; return km <= 11 ? 15 - 6.5 * km
 export function flightsLayer(api) {
   return {
     id: 'aircraft', group: 'live', label: 'Live flights', swatch: '#8ecbff', on: false, refresh: 12_000, pinless: true,
-    sources: ['opensky', 'adsblol', 'airplaneslive', 'adsbdb'],
+    sources: ['opensky', 'adsblol', 'airplaneslive', 'adsbdb', 'livedata'],
     options: [{ id: 'scope', label: 'Coverage', choices: [['world', 'Whole world'], ['near', 'Near my view (more detail)']], value: 'world' }],
     load: (o, ctx) => loadFlights(o, ctx),
     channels(d, ctx) {
@@ -152,9 +210,9 @@ export function flightsLayer(api) {
     open: (a) => openDeck(a, api),
     learn: {
       what: 'Aircraft broadcasting their position right now. Planes squawking an emergency code (7500, 7600, 7700) are drawn large in red with a pulsing ring and appear in the Live feed. Every plane is a pointer turned to its real heading. White is above 25,000 ft, yellow 10,000–25,000 ft, teal below 10,000 ft, grey on the ground. Click a plane for its seatback-style flight view.',
-      how: 'Planes work out where they are with satellite navigation and broadcast it about twice a second on 1090 MHz (ADS-B). Thousands of volunteer receivers share what they hear. “Whole world” reads the OpenSky Network once a minute; “Near my view” reads adsb.lol every few seconds within about 460 km of the centre of the screen. Heights are exaggerated so you can see them.',
+      how: 'Planes work out where they are with satellite navigation and broadcast it about twice a second on 1090 MHz (ADS-B). Thousands of volunteer receivers share what they hear. Flight trackers don’t let web pages read them directly (no CORS headers), so on the website a GitHub Actions job saves a worldwide snapshot every 10 minutes, and your browser moves each plane forward along its heading at its speed until the next one arrives (dead reckoning, as navigators did before satellites). The desktop app, or the optional proxy, reads OpenSky every 90 seconds and airplanes.live / adsb.lol every few seconds for “Near my view”. Heights are exaggerated so you can see them.',
       try: 'Pick a long-haul flight over an ocean, open its flight view and choose Follow. Then compare the “outside temperature” with the standard-atmosphere formula in the Learn page.',
-      refs: ['opensky', 'adsblol', 'adsbdb'],
+      refs: ['opensky', 'airplaneslive', 'adsblol', 'adsbdb', 'livedata'],
     },
   };
 }

@@ -107,3 +107,47 @@ export function greatCirclePoints(lat1, lng1, lat2, lng2, n = 64) {
 export const fmtKm = (km) => (km >= 100 ? `${Math.round(km).toLocaleString()} km` : `${km.toFixed(1)} km`);
 export const fmtLat = (v) => `${Math.abs(v).toFixed(3)}° ${v >= 0 ? 'N' : 'S'}`;
 export const fmtLng = (v) => `${Math.abs(v).toFixed(3)}° ${v >= 0 ? 'E' : 'W'}`;
+
+/**
+ * Moon position, low-precision formulae from the Astronomical Almanac (as given by Meeus and in
+ * "Low-precision formulae for planetary positions", Van Flandern & Pulkkinen 1979): about 0.3° in
+ * position, which is well under the Moon's own half-degree width.
+ * Returns the sublunar point, distance, and phase.
+ */
+export function moonState(date = new Date()) {
+  const d = date.getTime() / 86400000 + 2440587.5 - 2451545.0; const T = d / 36525;
+  const s = (a, b) => Math.sin((a + b * T) * D2R); const c = (a, b) => Math.cos((a + b * T) * D2R);
+  const lam = 218.32 + 481267.881 * T + 6.29 * s(135.0, 477198.87) - 1.27 * s(259.3, -413335.36) + 0.66 * s(235.7, 890534.22)
+    + 0.21 * s(269.9, 954397.74) - 0.19 * s(357.5, 35999.05) - 0.11 * s(186.5, 966404.03);
+  const bet = 5.13 * s(93.3, 483202.02) + 0.28 * s(228.2, 960400.89) - 0.28 * s(318.3, 6003.15) - 0.17 * s(217.6, -407332.21);
+  const par = 0.9508 + 0.0518 * c(135.0, 477198.87) + 0.0095 * c(259.3, -413335.36) + 0.0078 * c(235.7, 890534.22) + 0.0028 * c(269.9, 954397.74);
+  const L = lam * D2R; const B = bet * D2R;
+  const l = Math.cos(B) * Math.cos(L); const m = 0.9175 * Math.cos(B) * Math.sin(L) - 0.3978 * Math.sin(B); const n = 0.3978 * Math.cos(B) * Math.sin(L) + 0.9175 * Math.sin(B);
+  const ra = Math.atan2(m, l) * R2D; const dec = Math.asin(n) * R2D;
+  const gmstHours = (18.697374558 + 24.06570982441908 * d) % 24;
+  // Sun's ecliptic longitude (same model as subsolarPoint) for the phase
+  const g = (357.529 + 0.98560028 * d) * D2R; const q = 280.459 + 0.98564736 * d;
+  const sunLon = q + 1.915 * Math.sin(g) + 0.02 * Math.sin(2 * g);
+  const age = ((((lam - sunLon) % 360) + 360) % 360); // 0 new → 180 full → 360 new
+  const elong = Math.acos(Math.cos(B) * Math.cos((lam - sunLon) * D2R)) * R2D;
+  const illum = (1 - Math.cos(elong * D2R)) / 2;
+  const distKm = R_EARTH_KM / Math.sin(par * D2R);
+  return { lat: dec, lng: wrapLng(ra - gmstHours * 15), distKm, illum, age, waxing: age < 180, name: moonPhaseName(age) };
+}
+export function moonPhaseName(age) {
+  const names = ['New moon', 'Waxing crescent', 'First quarter', 'Waxing gibbous', 'Full moon', 'Waning gibbous', 'Last quarter', 'Waning crescent'];
+  return names[Math.round(age / 45) % 8];
+}
+/** The next time the Moon reaches a phase angle (0 new, 90 first quarter, 180 full, 270 last quarter). */
+export function nextMoonPhase(targetAge, from = new Date()) {
+  // The phase angle only ever grows (about 12° a day), so the distance still to go shrinks until we
+  // pass the target and then jumps back up to nearly 360°.
+  const togo = (age) => (((targetAge - age) % 360) + 360) % 360;
+  let t = from.getTime(); let prev = togo(moonState(from).age);
+  for (let i = 0; i < 24 * 31; i++) {
+    t += 3600_000; const now = togo(moonState(new Date(t)).age);
+    if (now > prev + 1) return new Date(t - 1800_000);
+    prev = now;
+  }
+  return null;
+}

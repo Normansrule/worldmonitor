@@ -20,7 +20,7 @@ export const launchesLayer = {
   options: [{ id: 'which', label: 'Launches', choices: [['upcoming', 'Upcoming'], ['previous', 'Recent']], value: 'upcoming' }],
   async load(o) {
     // Launch Library 2 allows ~15 anonymous requests an hour, so results are cached for 30 minutes.
-    const j = await getFeed('ll2', `https://ll.thespacedevs.com/2.2.0/launch/${o.which}/?limit=25&mode=detailed`, { ttl: 30 * 60_000, timeout: 30_000 });
+    const j = await getFeed('ll2', `https://ll.thespacedevs.com/2.2.0/launch/${o.which}/?limit=25&mode=detailed`, { ttl: 30 * 60_000, timeout: 30_000, snapshot: `launches-${o.which}.json` });
     return (j.results ?? []).map((l) => ({
       id: l.id, name: l.name, net: Date.parse(l.net), status: l.status?.name ?? '', abbrev: l.status?.abbrev ?? '', prob: l.probability,
       live: !!l.webcast_live, image: l.image ?? '', lat: Number(l.pad?.latitude), lng: Number(l.pad?.longitude), pad: l.pad?.name ?? '', site: l.pad?.location?.name ?? '',
@@ -72,8 +72,9 @@ export const alertsLayer = {
   sources: ['gdacs'],
   options: [{ id: 'level', label: 'Level', choices: [['Orange;Red', 'Orange and red'], ['Red', 'Red only'], ['Green;Orange;Red', 'All alerts']], value: 'Orange;Red' }],
   async load(o) {
-    const j = await getFeed('gdacs', `https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH?eventlist=EQ;TC;FL;VO;WF;DR&alertlevel=${o.level}`, { ttl: 15 * 60_000, timeout: 25_000 });
-    return (j.features ?? []).filter((f) => f.geometry?.type === 'Point').map((f) => {
+    const j = await getFeed('gdacs', `https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH?eventlist=EQ;TC;FL;VO;WF;DR&alertlevel=${o.level}`, { ttl: 15 * 60_000, timeout: 25_000, snapshot: 'gdacs.json' });
+    const want = new Set(o.level.split(';'));
+    return (j.features ?? []).filter((f) => f.geometry?.type === 'Point' && want.has(f.properties?.alertlevel)).map((f) => {
       const p = f.properties;
       return { id: `${p.eventtype}-${p.eventid}`, type: p.eventtype, name: p.name, desc: p.description, level: p.alertlevel, score: p.alertscore, country: p.country,
         from: p.fromdate, to: p.todate, sev: p.severitydata?.severitytext ?? '', lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0],

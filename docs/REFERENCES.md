@@ -4,6 +4,7 @@ Every data source, library and reference used by the Terra Atlas globe app. This
 
 | Source | Licence | Used for |
 |---|---|---|
+| [World Monitor by Elie Habib](https://github.com/koala73/worldmonitor) | AGPL-3.0-only | Original design, 3D globe concept, layer catalogue and the curated static datasets (cables, pipelines, ports, trade routes, chokepoints, AI data centres, spaceports, nuclear sites, economic centres, critical minerals, conflict zones, hotspots, country borders, textures). |
 | [globe.gl / three-globe (Vasco Asturiano)](https://github.com/vasturiano/globe.gl) | MIT | 3D globe rendering, slippy-map tile engine for deep zoom. |
 | [three.js](https://threejs.org) | MIT | WebGL engine underneath globe.gl; day/night shader. |
 | [satellite.js (SGP4/SDP4)](https://github.com/shashwatak/satellite-js) | MIT | Propagating satellite orbits from TLEs in the browser. |
@@ -13,7 +14,10 @@ Every data source, library and reference used by the Terra Atlas globe app. This
 | [CelesTrak GP element sets (T.S. Kelso)](https://celestrak.org/NORAD/elements/) | Free for use with attribution | Current two-line element sets for satellite groups. |
 | [globe.gl example dataset (space-track LEO snapshot, Feb 2022)](https://github.com/vasturiano/globe.gl/tree/master/example/datasets) | MIT (repo); data from Space-Track.org | Offline fallback for LEO satellites. |
 | [adsb.lol — community ADS-B network](https://adsb.lol) | ODbL 1.0 | Live aircraft near the view. |
-| [OpenSky Network (Schäfer et al., IPSN 2014)](https://opensky-network.org) | Non-commercial research/education | Aircraft fallback feed. |
+| [OpenSky Network (Schäfer et al., IPSN 2014)](https://opensky-network.org) | Non-commercial research/education | Worldwide aircraft positions (live in the desktop app, every 10 minutes on the website). |
+| [adsb.fi open data API](https://github.com/adsbfi/opendata) | Free non-commercial API | Third regional aircraft fallback. |
+| [Astronomical Almanac low-precision lunar formulae (Van Flandern & Pulkkinen, ApJS 41, 1979; Meeus, Astronomical Algorithms)](https://doi.org/10.1086/190623) | Published formulae | Moon position, distance and phase for the Moon and tides layer. |
+| [Terra Atlas live-data snapshot (tools/fetch-live.mjs on GitHub Actions)](https://github.com/Normansrule/worldmonitor/tree/live-data) | AGPL-3.0 code; data keeps each source’s licence | Every ~10 minutes, fetches feeds that browsers may not read directly (flights, launches, GDACS, orbits) and serves them with CORS headers. |
 | [NASA GIBS — VIIRS SNPP Corrected Reflectance (true colour)](https://nasa-gibs.github.io/gibs-api-docs/) | Public domain; acknowledgement requested | Yesterday’s Earth base map. We acknowledge the use of imagery provided by services from NASA’s Global Imagery Browse Services (GIBS), part of NASA’s Earth Science Data and Information System (ESDIS). |
 | [God’s Eye View (Bilawal Sidhu)](https://github.com/bilawalsidhu/gods-eye-view) | MIT | Inspiration for sensor looks and keyless browser data sources. |
 | [airplanes.live](https://airplanes.live) | Free non-commercial API | Regional aircraft fallback feed. |
@@ -24,7 +28,7 @@ Every data source, library and reference used by the Terra Atlas globe app. This
 | [Hong Kong Transport Department — traffic snapshots](https://data.gov.hk/en-data/dataset/hk-td-tis_2-traffic-snapshot-images) | DATA.GOV.HK terms of use | Hong Kong traffic cameras. |
 | [511 Ontario open data](https://511on.ca/developers/doc) | Open Government Licence – Ontario | Ontario highway cameras. |
 | [511 Alberta open data](https://511.alberta.ca/developers/doc) | Open Government Licence – Alberta | Alberta highway cameras. |
-| [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) | ODbL 1.0 | Mapped licence-plate readers (surveillance:type=ALPR). |
+| [OpenStreetMap standard tiles](https://operations.osmfoundation.org/policies/tiles/) | ODbL 1.0 — © OpenStreetMap contributors | Street map tiles for deep zoom. |
 | [DeFlock — crowdsourced ALPR mapping](https://deflock.me) | Data in OpenStreetMap (ODbL) | Project behind most mapped Flock and other ALPR cameras. |
 | [Overpass API](https://overpass-api.de) | Service for OSM data (ODbL) | Live query of mapped cameras in view. |
 | [EFF — Automated License Plate Readers](https://sls.eff.org/technologies/automated-license-plate-readers-alprs) | Reference | Civil-liberties perspective on ALPR. |
@@ -50,7 +54,6 @@ Every data source, library and reference used by the Terra Atlas globe app. This
 | [Wikipedia REST API (page summaries)](https://en.wikipedia.org/api/rest_v1/) | CC BY-SA 4.0 | Short encyclopaedia summaries in the country and place cards. |
 | [Nominatim (OpenStreetMap geocoding)](https://nominatim.org) | ODbL 1.0 — © OpenStreetMap contributors | Worldwide place search. |
 | [Esri World Imagery](https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9) | Esri terms of use — Esri, Maxar, Earthstar Geographics, and the GIS User Community | Satellite imagery tiles for street-level zoom. |
-| [OpenStreetMap standard tiles](https://operations.osmfoundation.org/policies/tiles/) | ODbL 1.0 — © OpenStreetMap contributors | Street map tiles for deep zoom. |
 | [Bird (2003) PB2002 plate boundaries, GeoJSON by Hugo Ahlenius (fraxen/tectonicplates)](https://github.com/fraxen/tectonicplates) | ODC-BY 1.0 | Tectonic plate boundaries. |
 | [Bird, P. (2003) An updated digital model of plate boundaries. G³ 4(3), 1027](https://doi.org/10.1029/2001GC000252) | Journal article | Scientific basis for the plate boundary model. |
 | [NASA Visible Earth — Blue Marble & Black Marble (city lights)](https://visibleearth.nasa.gov/collection/1484/blue-marble) | Public domain (NASA) | Day and night Earth textures. |
@@ -66,24 +69,6 @@ Every data source, library and reference used by the Terra Atlas globe app. This
 | [NOAA SWPC — Planetary K-index](https://www.swpc.noaa.gov/products/planetary-k-index) | Public domain | Kp scale explanation. |
 | [Natural Earth (country outlines via World Monitor; populated places)](https://www.naturalearthdata.com) | Public domain | Country polygons and city names. |
 
-## Projects this site references or borrows from
-
-| Project | Licence | Relationship |
-|---|---|---|
-| [World Monitor](https://github.com/koala73/worldmonitor) — Elie Habib | AGPL-3.0-only | Parent project (fork). Design, globe concept, layer catalogue, curated datasets, textures. |
-| [God’s Eye View](https://github.com/bilawalsidhu/gods-eye-view) — Bilawal Sidhu | MIT | Inspiration: sensor looks (NVG/thermal/CRT); its DATA_SOURCES notes pointed to NASA GIBS and adsb.lol. No code copied. |
-| [WebGL Fluid Simulation](https://github.com/PavelDoGreat/WebGL-Fluid-Simulation) — Pavel Dobryakov | MIT | Bundled (lightly edited) in `site/fluid/`. |
-| [GSAP](https://github.com/greensock/GSAP) | GSAP Standard no-charge licence | Bundled in `site/assets/vendor/` for page animation. |
-| [Magic UI](https://github.com/magicuidesign/magicui) | MIT | Ideas re-implemented in CSS/JS: border beam, number ticker, marquee. |
-| [React Bits](https://github.com/DavidHDev/react-bits) — David Haz | MIT + Commons Clause | Idea re-implemented: split-text reveal. |
-| [Motion Primitives](https://github.com/ibelick/motion-primitives) — Julien Thibeaut | MIT | Idea re-implemented: spotlight cards. |
-| [Animate UI](https://animate-ui.com/) | MIT | Idea re-implemented: tilt cards. |
-| [Remotion](https://github.com/remotion-dev/remotion) | Remotion licence | `video/` promo renders with it (free for individuals and small teams). |
-| [LLM Visualization](https://github.com/bbycroft/llm-viz) — Brendan Bycroft | see repo | Inspiration for narrated step-by-step tours. |
-| [Transformer Explainer](https://github.com/poloclub/transformer-explainer) — Georgia Tech Polo Club | MIT | Inspiration for “what / how / try this” Learn cards. |
-| [folio-2019](https://github.com/brunosimon/folio-2019) — Bruno Simon | MIT | Inspiration for toy-like 3D interaction. |
-| [Tauri](https://github.com/tauri-apps/tauri) | MIT / Apache-2.0 | Desktop shell (`desktop/`). |
-
 ## Scientific and teaching references
 
 - Bird, P. (2003). An updated digital model of plate boundaries. *Geochemistry, Geophysics, Geosystems*, 4(3), 1027. https://doi.org/10.1029/2001GC000252
@@ -96,3 +81,9 @@ Every data source, library and reference used by the Terra Atlas globe app. This
 - U.S. EIA — World Oil Transit Chokepoints. https://www.eia.gov/international/analysis/special-topics/World_Oil_Transit_Chokepoints
 - NASA Earth Observatory — Catalog of Earth Satellite Orbits. https://earthobservatory.nasa.gov/features/OrbitsCatalog
 - USGS — This Dynamic Earth. https://pubs.usgs.gov/gip/dynamic/dynamic.html
+- Van Flandern, T. C. & Pulkkinen, K. F. (1979). Low-precision formulae for planetary positions. *Astrophysical Journal Supplement* 41, 391. https://doi.org/10.1086/190623
+- Meeus, J. (1998). *Astronomical Algorithms*, 2nd ed., chapters 47–49 (Moon position and phases). Willmann-Bell.
+- NOAA Ocean Service — Tides and Water Levels tutorial. https://oceanservice.noaa.gov/education/tutorial_tides/
+- MDN — Cross-Origin Resource Sharing (CORS). https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS
+- adsb.fi open data, issue #6 (missing CORS headers block browser use). https://github.com/adsbfi/opendata/issues/6
+- Tauri 2 — Calling Rust from the frontend. https://v2.tauri.app/develop/calling-rust/
