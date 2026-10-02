@@ -124,7 +124,7 @@ export async function getSnapshot(id, name, { type = 'json', ttl = 60_000 } = {}
   const job = (async () => {
     try {
       // Desktop: fetch natively too (raw.githubusercontent.com is on the allowlist) so nothing depends on the webview cache.
-      const v = isDesktop ? await viaDesktop(url, type, 25_000) : await viaBrowser(`${url}?t=${Math.floor(Date.now() / 60_000)}`, type, 25_000);
+      const v = isDesktop ? await viaDesktop(url, type, 25_000) : await viaBrowser(url, type, 25_000) /* the CDN caches 5 minutes and sends ETags, so the browser revalidates cheaply instead of re-downloading */;
       cache.set(url, { t: Date.now(), v, via: 'snapshot' });
       setStatus(id, 'ok', 'from the 10-minute live-data snapshot', 'snapshot');
       return v;

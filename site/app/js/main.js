@@ -10,7 +10,8 @@ import * as astro from './astro.js';
 import { SOURCES } from './sources.js';
 import { TOURS } from './tours.js';
 import { moonLayer } from './moon.js';
-import { installExtras } from './extras.js';
+import { installExtras, waterName } from './extras.js';
+import { installSky } from './sky.js';
 import { Quiz, buildQuestionPool } from './quiz.js';
 import { flightsLayer, flightState, layoutPlanes, deckAction, glidePlanes, flightsNow } from './flights.js';
 import { camerasLayer, alprLayer, stopCameraMedia, alprRow } from './cameras.js';
@@ -22,14 +23,14 @@ import { installLive } from './live.js';
 import { openWall } from './cameras.js';
 import { powerLayer, internetLayer, radioLayer, shipsLayer, overlayLayer } from './networks.js';
 import { installHud } from './hud.js';
-import { MarkerRenderer, GeoIndex, iconsReady } from './markers.js';
+import { MarkerRenderer, GeoIndex, MultiIndex, iconsReady } from './markers.js';
 import { installPerformance, installProgramKeeper, installIdleGovernor } from './perf.js';
 import { clock, SPEEDS, speedLabel } from './clock.js';
 import { launchesLayer, alertsLayer, countdown } from './launches.js';
 import { installTrace } from './trace.js';
 import { windLayer } from './wind.js';
 import { smallCircle } from './astro.js';
-export const VERSION = '1.9';
+export const VERSION = '1.10';
 const NEW_VERSION = (() => { try { return localStorage.getItem('terra-atlas-version') !== VERSION; } catch { return false; } })();
 
 import { glyphSvg } from './icons.js';
@@ -327,15 +328,17 @@ function countryAt(lat, lng) {
 
 let composeQueued = false;
 function scheduleCompose() { if (composeQueued) return; composeQueued = true; requestAnimationFrame(() => { composeQueued = false; compose(); }); }
+// push(...big) overflows the call stack past ~100,000 items (the full plate-reader and camera sets do), so append in a loop
+function appendAll(dst, src) { for (let i = 0; i < src.length; i++) dst.push(src[i]); }
 function compose() {
   const acc = { points: [], rings: [], paths: [], arcs: [], polygons: [], labels: [], particles: [], html: [], custom: [], pick: [], hexes: [] };
   for (const l of LAYERS) {
     if (!state.on.has(l.id)) continue;
     const ch = state.chan[l.id];
     if (!ch) continue;
-    for (const k of Object.keys(acc)) if (ch[k]) acc[k].push(...ch[k]);
+    for (const k of Object.keys(acc)) if (ch[k]) appendAll(acc[k], ch[k]);
   }
-  for (const k of Object.keys(state.tool)) acc[k].push(...state.tool[k]);
+  for (const k of Object.keys(state.tool)) appendAll(acc[k], state.tool[k]);
   compose.animating = acc.rings.length > 0 || acc.particles.length > 0 || acc.arcs.some((a) => a.animMs) || acc.paths.some((p) => p.animMs);
   gov?.wake(500);
   document.body.classList.toggle('close', state.pov.altitude < 0.025);
@@ -358,7 +361,7 @@ compose.last = {};
 
 // ---- Fast markers: columns in one instanced mesh, the nearest markers as sprite pins (with a label card
 // for the closest ones), names as cached sprites, and a lat/lng grid index for hover and click.
-state.index = new GeoIndex(0.5); state.elevated = [];
+state.index = new GeoIndex(0.5); state.elevated = []; const idxCache = new WeakMap();
 function markerPass(acc) {
   const v = viewOf(state.pov); const q = perf.q;
   markers.setCamera(state.pov.altitude);
@@ -376,7 +379,10 @@ function markerPass(acc) {
       cand.push({ p, km, l });
     }
     // Up close the nearest things win; from far away the most important ones do (taller column = bigger quake, bigger plant…).
-    if (far) cand.sort((x, y) => (y.p.alt ?? 0) - (x.p.alt ?? 0) || x.km - y.km); else cand.sort((x, y) => x.km - y.km);
+    // Hysteresis: whatever was shown last time keeps a head start, so symbols and cards don't swap around every time the camera stops.
+    const prev = markerPass.prev ?? new Set(); const keep = (c) => (prev.has(c.p.ref?.d) ? 1 : 0);
+    if (far) cand.sort((x, y) => (y.p.alt ?? 0) * (1 + 0.5 * keep(y)) - (x.p.alt ?? 0) * (1 + 0.5 * keep(x)) || x.km - y.km);
+    else cand.sort((x, y) => x.km * (keep(x) ? 0.6 : 1) - y.km * (keep(y) ? 0.6 : 1));
     if (cand.length > 1500) { for (const c of cand.slice(1500)) cols.push(c.p); cand.length = 1500; }
     // The thing you clicked always stays a pin — it is never clustered away or dropped when you zoom in.
     const si = selD ? cand.findIndex((c) => c.p.ref?.d === selD) : -1;
@@ -405,14 +411,48 @@ function markerPass(acc) {
       pins.push(pin); placed.push({ x: sc.x, y: sc.y, pin });
     }
   }
-  const lbl = labels.slice(0, q.labels).map((l) => ({ lat: l.lat, lng: l.lng, alt: l.alt ?? 0.004, text: l.text, color: solid(l.color, '#eef3f6'), size: l.px ? l.size : Math.max(11, Math.min(16, (l.size ?? 1) * 12)), ref: l.ref, tip: l.tip }));
+  markerPass.prev = new Set(pins.map((p) => p.ref?.d));
+  // Names never overlap each other or a symbol: place them greedily, biggest first, and drop any that would collide.
+  const boxes = pins.map((p) => { const s = globe.getScreenCoords(p.lat, p.lng, markers.floatAlt); return s ? { x0: s.x - 15, x1: s.x + (p.detailed ? 260 : 15), y0: s.y - 17, y1: s.y + 17 } : null; }).filter(Boolean);
+  const lbl = [];
+  const sortedLabels = labels.map((l, i) => [l, i]).sort((a, b) => (b[0].size ?? 1) - (a[0].size ?? 1) || a[1] - b[1]).map(([l]) => l);
+  const cam = globe.camera().position; const camL = cam.length(); const horizon = R / camL;
+  const facing = (lat, lng) => { const w = globe.getCoords(lat, lng, 0); return (w.x * cam.x + w.y * cam.y + w.z * cam.z) / (Math.hypot(w.x, w.y, w.z) * camL) > horizon + 0.01; };
+  for (const l of sortedLabels) {
+    if (lbl.length >= q.labels) break;
+    if (!facing(l.lat, l.lng)) continue; // far side of the planet: not drawn, so it must not block anything
+    const size = l.px ? l.size : Math.max(11, Math.min(16, (l.size ?? 1) * 12));
+    const text = l.text ?? '';
+    if (text) {
+      const s = globe.getScreenCoords(l.lat, l.lng, markers.floatAlt);
+      if (s) {
+        const box = { x0: s.x - 4, x1: s.x + 12 + text.length * size * 0.56, y0: s.y - size * 0.8, y1: s.y + size * 0.8 };
+        if (boxes.some((b) => box.x0 < b.x1 && b.x0 < box.x1 && box.y0 < b.y1 && b.y0 < box.y1)) continue;
+        boxes.push(box);
+      }
+    }
+    lbl.push({ lat: l.lat, lng: l.lng, alt: l.alt ?? 0.004, text, color: solid(l.color, '#eef3f6'), size, ref: l.ref, tip: l.tip });
+  }
   markers.setPoints(cols.length > q.columns ? cols.slice(0, q.columns) : cols, zk());
   markers.setSprites(pins, lbl);
-  // index for hover/click; things well above the ground are picked in screen space instead
-  const idx = new GeoIndex(v.altitude < 0.05 ? 0.05 : v.altitude < 0.5 ? 0.25 : 1); const elevated = [];
-  const addP = (p) => { if (!p.ref) return; if ((p.alt ?? 0) > 0.03) elevated.push(p); else idx.add(p); };
-  pts.forEach(addP); lbl.forEach(addP); acc.pick.forEach(addP);
-  state.index = idx; state.elevated = elevated;
+  // Index for hover and click. Things well above the ground are picked in screen space instead. Each layer's
+  // index is cached against its data arrays and only rebuilt when they change (or the zoom band does).
+  const cell = v.altitude < 0.05 ? 0.05 : v.altitude < 0.5 ? 0.25 : 1;
+  const parts = []; const elevated = [];
+  const build = (arr) => { const idx = new GeoIndex(cell); const el = []; for (const p of arr) { if (!p.ref) continue; if ((p.alt ?? 0) > 0.03) el.push(p); else idx.add(p); } return { idx, el }; };
+  const use = (arr, cacheable) => {
+    if (!arr?.length) return;
+    let c = cacheable ? idxCache.get(arr) : null;
+    if (!c || c.cell !== cell || c.v !== arr.__v) { c = { ...build(arr), cell, v: arr.__v }; if (cacheable) idxCache.set(arr, c); }
+    parts.push(c.idx); for (const p of c.el) elevated.push(p);
+  };
+  for (const l of LAYERS) {
+    if (!state.on.has(l.id)) continue; const ch = state.chan[l.id]; if (!ch) continue;
+    const filtered = state.hideGlyph[l.id]?.size;
+    use(filtered ? filterByGlyph(ch.points ?? []) : ch.points, !filtered); use(ch.pick, true);
+  }
+  use(state.tool.points, false); use(state.tool.pick, false); use(lbl, false);
+  state.index = new MultiIndex(parts); state.elevated = elevated;
   cullSprites();
 }
 // Symbol filters: click a symbol in a layer's key to hide or show that kind (e.g. only wildfires).
@@ -455,7 +495,10 @@ function cullSprites() {
   for (const sp of markers.pool) {
     if (!sp.userData.d) continue;
     if (!sp.userData.want) { sp.visible = false; continue; }
-    const p = sp.position; sp.visible = (p.x * c.x + p.y * c.y + p.z * c.z) / (p.length() * cl) > (R * 1.0) / cl - 0.002;
+    // Fade sprites out as they reach the planet's edge instead of letting them pile up on the rim and pop.
+    const p = sp.position; const dot = (p.x * c.x + p.y * c.y + p.z * c.z) / (p.length() * cl); const edge = (R * 1.0) / cl;
+    const fade = Math.max(0, Math.min(1, (dot - edge) / (sp.userData.pin ? 0.03 : 0.06)));
+    sp.visible = fade > 0.02; sp.material.opacity = fade;
   }
 }
 const plainTip = (t) => String(t ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
@@ -729,6 +772,7 @@ $('#notes-body').addEventListener('click', (e) => {
   if (t.dataset.action) runAction(t.dataset.action);
   if (t.dataset.board) extras?.flightsBoard();
   if (t.dataset.share) shareLink();
+  if (t.dataset.sky) { const [a, b] = t.dataset.sky.split(',').map(Number); sky.open(a, b); }
   if (t.dataset.enableFlights) { toggleLayer('aircraft', true); renderLayerPanel(); setTimeout(() => { if (state.selected?.layer === 'airports') runAction('airport-board'); }, 5000); }
   if (t.dataset.deck) deckAction(t.dataset.deck, api);
   if (t.dataset.cam) { const c = state.data.cameras?.cams.find((x) => x.id === t.dataset.cam); if (c) { select({ layer: 'cameras', d: c }); fly(c.lat, c.lng, Math.min(state.pov.altitude, 0.02)); } }
@@ -768,6 +812,7 @@ function probeHtml(lat, lng) {
     <div id="probe-plate" class="muted"></div>
     <h4>Look around</h4>
     <div class="row">
+      <button class="btn" data-sky="${lat},${lng}">Sky above here</button>
       <a class="btn ghost" href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}" target="_blank" rel="noopener">Street View</a>
       <a class="btn ghost" href="https://earth.google.com/web/@${lat},${lng},150a,900d,35y,0h,65t,0r" target="_blank" rel="noopener">Google Earth 3D</a>
       <a class="btn ghost" href="https://www.mapillary.com/app/?lat=${lat}&lng=${lng}&z=17" target="_blank" rel="noopener">Mapillary</a>
@@ -864,7 +909,7 @@ function setPins(pins) { state.tool.html = pins.map((p) => ({ lat: p.lat, lng: p
 function clearTool() { state.tool = { points: [], paths: [], arcs: [], html: [], labels: [], rings: [] }; compose(); }
 function pulse(lat, lng, rKm) { const ring = { lat, lng, color: '#7ed6c4', maxR: rKm / 111 / Math.max(zk(), 0.001), speed: rKm / 111 / 0.9 / Math.max(zk(), 0.001), period: 900 }; state.tool.rings.push(ring); compose(); setTimeout(() => { state.tool.rings = state.tool.rings.filter((r) => r !== ring); compose(); }, 3200); }
 function setHover(c) {
-  if (c === state.hover) return;
+  if (c === state.hover || state.dragging) return; // never rebuild anything while the globe is being dragged
   state.hover = c; $('#globe').style.cursor = c && !state.mode ? 'pointer' : state.mode === 'measure' || state.mode === 'quiz' ? 'crosshair' : '';
   if (state.data.borders && state.on.has('borders')) { state.chan.borders = layerById.borders.channels(state.data.borders, ctx()); compose(); }
 }
@@ -1136,7 +1181,8 @@ async function viewSettled() {
 }
 // Screen-space picking for things drawn as particles or instances (planes, satellites, cameras from afar).
 let downAt = null;
-$('#globe').addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; state.clickConsumed = false; }, true);
+$('#globe').addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; state.clickConsumed = false; state.dragging = true; }, true);
+addEventListener('pointerup', () => { state.dragging = false; }, true); addEventListener('pointercancel', () => { state.dragging = false; }, true);
 $('#globe').addEventListener('pointerup', (e) => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5 || ['measure', 'quiz', 'trace'].includes(state.mode)) return; // these modes want the ground, not the marker
   if (e.target.closest?.('.pinx')) return;
@@ -1173,13 +1219,17 @@ function pickAt(x, y, { elevated = true } = {}) {
   }
   return best;
 }
+const planeTip = (a) => `<div class="tip"><b>${esc(a.call || a.id.toUpperCase())}${a.type ? ` · ${esc(a.type)}` : ''}</b><span>${a.ground ? 'on the ground' : `${Math.round(a.altFt).toLocaleString()} ft`}${a.kt ? ` · ${Math.round(a.kt * 1.852)} km/h` : ''} · click for the flight view</span></div>`;
 // Hover tooltips from the same index (throttled).
 let hoverAt = 0; const tipEl = document.createElement('div'); tipEl.className = 'hovertip'; tipEl.hidden = true; document.body.appendChild(tipEl);
 $('#globe').addEventListener('pointermove', (e) => {
   const now = performance.now(); if (now - hoverAt < 70) return; hoverAt = now;
   const rect = $('#globe').getBoundingClientRect(); const x = e.clientX - rect.left; const y = e.clientY - rect.top;
-  const h = pickAt(x, y, { elevated: false });
+  const h0 = pickAt(x, y, { elevated: false });
+  const h = h0 && !h0.tip && h0.ref?.layer === 'aircraft' ? { ...h0, tip: planeTip(h0.ref.d) } : h0;
+  if (e.buttons) { tipEl.hidden = true; return; } // no hover cards while dragging
   if (h?.tip) { const gn = !h.zoom && itemGlyph(h.ref); tipEl.innerHTML = (gn ? glyphSvg(gn, solid(h.color, layerById[h.ref.layer]?.swatch ?? '#eef3f6'), 22) : '') + h.tip; tipEl.hidden = false; tipEl.style.transform = `translate(${Math.min(e.clientX + 14, innerWidth - 300)}px, ${e.clientY + 14}px)`; $('#globe').style.cursor = 'pointer'; }
+  else if (state.hover && state.pov.altitude > 0.25 && !state.mode) { tipEl.innerHTML = `<div class="tip"><b>${esc(state.hover.properties.name)}</b><span>click for the country card</span></div>`; tipEl.hidden = false; tipEl.style.transform = `translate(${Math.min(e.clientX + 14, innerWidth - 300)}px, ${e.clientY + 14}px)`; }
   else { tipEl.hidden = true; if (!state.hover) $('#globe').style.cursor = state.mode === 'measure' || state.mode === 'quiz' ? 'crosshair' : ''; }
 });
 $('#globe').addEventListener('pointerleave', () => { tipEl.hidden = true; });
@@ -1295,7 +1345,7 @@ function setLook(look) {
 }
 document.querySelectorAll('[data-look]').forEach((b) => b.addEventListener('click', () => setLook(b.dataset.look)));
 document.addEventListener('keydown', (e) => { if (!e.target.matches('input, select, textarea') && /^[1-5]$/.test(e.key)) setLook(LOOKS[Number(e.key) - 1]); });
-let hud = null; let tracer = null; let extras = null;
+let hud = null; let tracer = null; let extras = null; let sky = null;
 $('#gibs-date-input').max = new Date(Date.now() - 24 * 3600_000).toISOString().slice(0, 10);
 $('#gibs-date-input').value = gibsDate();
 $('#gibs-date-input').addEventListener('change', (e) => { state.gibsDate = e.target.value || null; applyBase(); });
@@ -1342,12 +1392,21 @@ $('#apply-now').addEventListener('click', applyPending);
 $('#apply-undo').addEventListener('click', () => { state.pending.clear(); renderLayerPanel(); });
 const live = installLive(api);
 tracer = installTrace(api);
+/** A human name for a spot: the nearest big city if there is one close by, else the country or the sea. */
+function placeName(lat, lng) {
+  let best = null; let bestKm = 120;
+  for (const c of state.data.cities ?? []) { if (Math.abs(c.lat - lat) > 1.2) continue; const km = astro.haversineKm(lat, lng, c.lat, c.lng); if (km < bestKm) { bestKm = km; best = c; } }
+  const country = countryAt(lat, lng)?.properties?.name;
+  if (best) return `${bestKm < 15 ? '' : 'near '}${best.name}${country ? `, ${country}` : ''}`;
+  return country ?? waterName(lat, lng);
+}
+sky = installSky({ ...api, placeName });
 extras = installExtras({
   ...api, LAYERS, PRESETS, TOURS, toggleLayer, renderLayerPanel, showLearn, preset, countryAt, geocode, fly,
   startTour: (id) => { if (state.mode !== 'tours') setMode('tours'); startTour(id); },
   start: (k) => { const b = document.createElement('button'); b.dataset.start = k; b.hidden = true; document.body.appendChild(b); b.click(); b.remove(); },
   trace: () => { setMode('trace'); tracer.trace(state.pov.lat, state.pov.lng); },
-  whatsNew: () => whatsNew(), layer: (id) => layerById[id], solarElevation: astro.solarElevation,
+  whatsNew: () => whatsNew(), layer: (id) => layerById[id], solarElevation: astro.solarElevation, sky: (lat, lng) => sky.open(lat, lng),
 });
 $('#pal-open').addEventListener('click', () => extras.open());
 // Live countdowns in any open card
@@ -1361,9 +1420,11 @@ setInterval(() => {
   const sel = glidePlanes(globe, state.pov.altitude);
   if (sel && flightState.follow) followTo(sel.lat, sel.lng);
 }, 500);
+// Keep side panels clear of the bottom bar, whose height changes when it wraps on narrower windows.
+{ const bb = document.querySelector('.bottombar'); const setBB = () => document.documentElement.style.setProperty('--bb', `${Math.ceil(bb.getBoundingClientRect().height)}px`); if (bb) { setBB(); new ResizeObserver(setBB).observe(bb); } }
 gov = installIdleGovernor(globe, {
   busy: () => controls.autoRotate || !!state.tour || flightState.follow || !!state.ride,
-  animating: () => compose.animating || state.on.has('wind') || !clock.isLive(),
+  animating: () => compose.animating || state.on.has('wind') || state.on.has('aircraft') || !clock.isLive(),
 });
 hud = installHud(api);
 if (state.look === 'hud') hud.show(true);
@@ -1371,7 +1432,15 @@ if (NEW_VERSION) { if (!state.pendingSel) setTimeout(whatsNew, 600); try { local
 else if (!location.hash.includes('@') && !isMobile) welcome();
 function whatsNew() {
   const g = (n, c) => glyphSvg(n, c, 26);
-  openNotes(`What’s new in v${VERSION}`, `<h3>Planes that glide, airport boards, flight search and shareable links</h3>
+  openNotes(`What’s new in v${VERSION}`, `<h3>Smooth and steady, plus the sky above you</h3>
+    <div class="legend">
+      <span>${g('sat', '#b7a3ff')}<b>Sky above here:</b> click any spot on the ground, then “Sky above here” for a live chart of the Sun, Moon, satellites and planes overhead.</span>
+      <span>${g('plane', '#8ecbff')}Planes now glide on the graphics card, perfectly smooth at any frame rate. Hover a plane for its callsign, height and speed.</span>
+      <span>${g('alert', '#f07a63')}<b>Fixed:</b> the screen could flash blank when the globe was still; very large camera and plate-reader sets could stop the map updating; hovering countries caused stutter.</span>
+      <span>${g('city', '#eef3f6')}Place names no longer pile on top of each other, markers stop reshuffling every time you pause, and labels fade out at the planet’s edge.</span>
+    </div>
+    <p class="muted">The flight snapshot now refreshes every 4 minutes instead of waiting for GitHub’s unreliable 10-minute schedule.</p>
+    <h4>From v1.9 — planes that glide, airport boards, flight search and shareable links</h4>
     <div class="legend">
       <span>${g('plane', '#8ecbff')}Planes now glide smoothly along their heading between updates instead of jumping every few seconds.</span>
       <span>${g('pin', '#b7c8d6')}Click an airport for its <b>arrivals, departures and planes on the ground</b> right now, with landing estimates.</span>

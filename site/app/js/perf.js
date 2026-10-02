@@ -4,9 +4,9 @@
 //  • Auto watches the real frame rate and steps down when the device struggles.
 //  • While you drag or zoom, heavy recomputation is postponed until the camera settles.
 export const LEVELS = {
-  high: { label: 'High', dpr: 1.75, pins: 160, pinsPerLayer: 45, cards: 30, labels: 140, columns: 40000, atmosphere: true },
-  balanced: { label: 'Balanced', dpr: 1.25, pins: 100, pinsPerLayer: 30, cards: 18, labels: 90, columns: 15000, atmosphere: true },
-  fast: { label: 'Fast', dpr: 0.85, pins: 50, pinsPerLayer: 15, cards: 8, labels: 50, columns: 6000, atmosphere: false },
+  high: { label: 'High', dpr: 1.75, pins: 160, pinsPerLayer: 45, cards: 12, labels: 140, columns: 40000, atmosphere: true },
+  balanced: { label: 'Balanced', dpr: 1.25, pins: 100, pinsPerLayer: 30, cards: 8, labels: 90, columns: 15000, atmosphere: true },
+  fast: { label: 'Fast', dpr: 0.85, pins: 50, pinsPerLayer: 15, cards: 5, labels: 50, columns: 6000, atmosphere: false },
 };
 const ORDER = ['high', 'balanced', 'fast'];
 
@@ -86,17 +86,22 @@ export function installProgramKeeper(globe) {
  * @param {{ animating: () => boolean, busy: () => boolean }} hooks
  */
 export function installIdleGovernor(globe, { animating, busy }) {
-  const renderer = globe.renderer(); const orig = renderer.render.bind(renderer);
+  const renderer = globe.renderer();
+  // globe.gl draws through an EffectComposer whose render pass CLEARS the screen before drawing. Skipping only
+  // renderer.render() therefore left cleared (black) frames on fast screens: the whole composer pass must be
+  // skipped, so nothing touches the canvas and the browser keeps showing the last frame.
+  const composer = globe.postProcessingComposer?.();
+  const target = composer ?? renderer; const orig = target.render.bind(target);
   let awakeUntil = performance.now() + 5000; let last = 0; let skipped = 0; let drawn = 0;
   const off = new URLSearchParams(location.search).has('nogovernor');
   const wake = (ms = 2500) => { awakeUntil = Math.max(awakeUntil, performance.now() + ms); };
-  renderer.render = (scene, camera) => {
+  target.render = (...args) => {
     const now = performance.now();
-    if (!off && now > awakeUntil && renderer.getRenderTarget() === null && !busy()) {
+    if (!off && now > awakeUntil && !busy() && (composer || renderer.getRenderTarget() === null)) {
       const gap = animating() ? 1000 / 30 - 2 : 1000 / 5 - 2;
       if (now - last < gap) { skipped += 1; return; }
     }
-    last = now; drawn += 1; orig(scene, camera);
+    last = now; drawn += 1; orig(...args);
   };
   const el = renderer.domElement;
   for (const ev of ['pointerdown', 'pointermove', 'wheel', 'touchstart', 'touchmove']) el.addEventListener(ev, () => wake(), { passive: true });
@@ -108,7 +113,7 @@ export function installIdleGovernor(globe, { animating, busy }) {
   return {
     wake,
     /** Draw right now, whatever the governor says (for screenshots). */
-    renderNow() { orig(globe.scene(), globe.camera()); },
+    renderNow() { if (composer) orig(); else orig(globe.scene(), globe.camera()); },
     stats: () => ({ drawn, skipped, idle: performance.now() > awakeUntil }),
   };
 }

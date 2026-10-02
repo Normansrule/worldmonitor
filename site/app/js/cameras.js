@@ -86,7 +86,7 @@ async function playStream(url) {
 // --------------------------------------------------------------- licence-plate readers (ALPR)
 const cellKey = (lat, lng) => `${Math.floor(lat / 10) * 10}_${Math.floor(lng / 10) * 10}`;
 export function alprLayer(api) {
-  let index = null; let density = null; const cells = new Map(); const live = new Map();
+  let index = null; let density = null; const cells = new Map(); const live = new Map(); let lastRows = null; let lastKey = '';
   return {
     id: 'alpr', group: 'cams', label: 'Licence-plate readers', swatch: '#f07a63', on: false, viewDependent: true, reloadOnView: true, pin: 'alpr',
     sources: ['osm', 'deflock', 'overpass'],
@@ -108,10 +108,16 @@ export function alprLayer(api) {
       } else if (v.altitude < 0.25) {
         await this.fetchLive(v);
       }
-      const rows = [...cells.values()].flat();
+      // Same cells as last time → return the very same object, so the particle cloud and the click index
+      // (tens of thousands of readers) are reused instead of rebuilt every time the camera stops.
+      const key = `${cells.size}|${live.size}`;
+      if (lastRows && key === lastKey) return lastRows;
+      const rows = [];
+      for (const c of cells.values()) for (const r of c) rows.push(r);
       const seen = new Set(rows.map((r) => r[0]));
       for (const r of live.values()) if (!seen.has(r[0])) rows.push(r);
-      return { rows, at: index?.generatedAt ?? null, total: index?.total ?? rows.length, hasIndex: !!index };
+      lastKey = key; lastRows = { rows, at: index?.generatedAt ?? null, total: index?.total ?? rows.length, hasIndex: !!index };
+      return lastRows;
     },
     async fetchLive(v) {
       const d = Math.min(1.5, v.radiusKm / 111);
@@ -123,7 +129,7 @@ export function alprLayer(api) {
     channels(d, ctx) {
       const v = ctx.view;
       if (d.density) {
-        const max = Math.max(...d.density.map((r) => r[2]));
+        const max = d.density.reduce((m, r) => Math.max(m, r[2]), 1);
         return { points: d.density.map(([lat, lng, n]) => ({ lat, lng, alt: 0.004 + 0.12 * Math.log1p(n) / Math.log1p(max), r: 0.35, color: n > 500 ? '#f07a63' : n > 50 ? '#f39a86' : 'rgba(240,122,99,0.55)', tip: tip(`${n.toLocaleString()} mapped readers`, 'in this 1° square — zoom in for each camera'), ref: { layer: 'alpr', d: { density: n, lat, lng } } })) };
       }
       const near = v.altitude < 0.9 ? d.rows.filter((r) => inView(v, r[1], r[2])).slice(0, 1200) : [];

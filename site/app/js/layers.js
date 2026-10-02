@@ -323,8 +323,9 @@ export const LAYERS = [
     channels(fs, ctx) {
       const h = ctx.hover;
       return {
-        custom: [ctx.outlineMesh('borders', fs)],
-        polygons: h ? [{ geometry: h.geometry, country: h, side: 'rgba(0,0,0,0)', alt: 0.006, tip: tip(h.properties.name, 'click for the country card'), ref: { layer: 'borders', d: h } }] : [],
+        // The hovered country gets a bright outline (cached per country). Filling it with a polygon meant
+        // re-triangulating thousands of vertices on every hover change, and up close the fill covered the screen.
+        custom: [ctx.outlineMesh('borders', fs), ...(h ? [ctx.outlineMesh(`hover:${h.properties.name}`, [h], 0xffe08a, 0.95, 0.0046)] : [])],
       };
     },
     learn: {

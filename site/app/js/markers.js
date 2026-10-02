@@ -26,9 +26,11 @@ export function parseColor(c) {
 }
 
 // ------------------------------------------------------------------ geo grid index
+// Numeric cell keys (string keys like "12:-34" made building the index for 80,000 markers the single
+// biggest cost after every camera move).
 export class GeoIndex {
   constructor(cell = 0.5) { this.cell = cell; this.map = new Map(); this.size = 0; }
-  key(la, lo) { return `${Math.floor(la / this.cell)}:${Math.floor(lo / this.cell)}`; }
+  key(la, lo) { return (Math.floor(la / this.cell) + 4000) * 20000 + (Math.floor(lo / this.cell) + 9000); }
   add(item) { const k = this.key(item.lat, item.lng); let a = this.map.get(k); if (!a) this.map.set(k, (a = [])); a.push(item); this.size += 1; }
   /** nearest item within radiusKm; filter optional */
   nearest(lat, lng, radiusKm, filter) {
@@ -37,16 +39,26 @@ export class GeoIndex {
     const i0 = Math.floor((lat - dLat) / c); const i1 = Math.floor((lat + dLat) / c);
     const j0 = Math.floor((lng - dLng) / c); const j1 = Math.floor((lng + dLng) / c);
     if ((i1 - i0 + 1) * (j1 - j0 + 1) > 4000) return null; // absurdly large query; skip
+    const cosl = Math.cos(lat * D2R);
     for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
-      const a = this.map.get(`${i}:${j}`); if (!a) continue;
+      const a = this.map.get((i + 4000) * 20000 + (j + 9000)); if (!a) continue;
       for (const it of a) {
         if (filter && !filter(it)) continue;
-        const y = (it.lat - lat) * 111; const x = (it.lng - lng) * 111 * Math.cos(lat * D2R);
+        const y = (it.lat - lat) * 111; const x = (it.lng - lng) * 111 * cosl;
         const d = Math.sqrt(x * x + y * y);
         if (d < bestD) { bestD = d; best = it; }
       }
     }
     return best ? { item: best, km: bestD } : null;
+  }
+}
+/** Several indexes queried as one (each layer's index is cached until its data changes). */
+export class MultiIndex {
+  constructor(parts) { this.parts = parts; }
+  nearest(lat, lng, radiusKm, filter) {
+    let best = null;
+    for (const p of this.parts) { const n = p.nearest(lat, lng, best ? best.km : radiusKm, filter); if (n && (!best || n.km < best.km)) best = n; }
+    return best;
   }
 }
 

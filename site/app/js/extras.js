@@ -42,6 +42,7 @@ export function installExtras(x) {
     const c = (group, label, run, hint = '') => out.push({ group, label, run, hint, key: `${label} ${group} ${hint}`.toLowerCase() });
     c('Action', 'Ride along with the ISS', () => ride(true), 'follow the space station');
     c('Action', 'Flights board', () => flightsBoard(), 'fastest, highest, emergencies');
+    c('Action', 'Sky above the centre of the view', () => x.sky(state.pov.lat, state.pov.lng), 'Sun, Moon, satellites and planes overhead');
     c('Action', 'Save this view', () => saveView(), 'bookmark camera and layers');
     c('Action', 'Saved views', () => viewsPanel(), 'your bookmarks');
     c('Action', 'Replay a week of earthquakes', () => x.start('replay'), 'time machine');

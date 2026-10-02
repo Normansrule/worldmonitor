@@ -403,3 +403,32 @@ h3.withglyph .glyph { flex: none; }
 .lchip[aria-pressed='false'] { opacity: 0.4; text-decoration: line-through; }
 .lchip:hover { border-color: var(--brass); }
 .legend .lchip { border-radius: 10px; padding: 4px 8px; font-size: 13px; justify-content: flex-start; }
+
+/* ---------- v1.10: layout that adapts to smaller windows (the bottom bar can wrap to two rows) ---------- */
+:root { --bb: 64px; }
+@media (min-width: 861px) {
+  .layers { bottom: calc(var(--bb) + 22px); }
+  .notes { max-height: calc(100% - 96px - var(--bb)); }
+  .mapctl { bottom: calc(var(--bb) + 70px); }
+  .toast { bottom: calc(var(--bb) + 24px); }
+  .timebar { bottom: calc(var(--bb) + 20px); }
+}
+@media (max-width: 1320px) and (min-width: 861px) {
+  .modes .navlink { display: none; }
+  .modes button { padding-left: 9px; padding-right: 9px; }
+  .search { min-width: 170px; }
+}
+@media (max-height: 760px) and (min-width: 861px) {
+  .layers { top: 70px; }
+  .notes { top: 70px; }
+  .ticker { display: none; }
+}
+/* sky chart */
+.sky { width: 100%; max-width: 320px; display: block; margin: 6px auto 8px; }
+.sky-bg { fill: #071a2c; stroke: var(--rule); stroke-width: 1.5; }
+.sky-ring { fill: none; stroke: rgba(169, 188, 203, 0.22); stroke-width: 1; }
+.sky-dir { fill: var(--mist); font: 700 11px var(--body); text-anchor: middle; dominant-baseline: middle; }
+.sky-lbl { fill: var(--paper); font: 700 10.5px var(--body); paint-order: stroke; stroke: #071a2c; stroke-width: 3px; }
+.sky-sun { filter: drop-shadow(0 0 6px rgba(255, 211, 122, 0.8)); }
+.skylist { margin: 0 0 10px; padding-left: 18px; font-size: 13.5px; }
+.skylist li { margin: 2px 0; }

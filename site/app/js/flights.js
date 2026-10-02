@@ -134,12 +134,18 @@ function glideTo(list, now) {
 }
 let lastPick = [];
 /** Called a few times a second: planes glide smoothly instead of jumping at each refresh. */
+let rebasedAt = 0;
 export function glidePlanes(globe, camAlt) {
   if (!lastList.length) return null;
-  glideTo(lastList, Date.now());
-  layoutPlanes(globe, camAlt, lastList);
-  for (const p of lastPick) { const a = p.ref.d; p.lat = a.lat; p.lng = a.lng; p.alt = a._alt ?? p.alt; }
-  return lastList.find((a) => a.id === flightState.selected) ?? null;
+  const now = Date.now();
+  const sel = flightState.selected ? lastList.find((a) => a.id === flightState.selected) ?? null : null;
+  if (now - rebasedAt > 5000) { // the shader does the in-between motion; re-base the true positions every 5 s
+    rebasedAt = now;
+    layoutPlanes(globe, camAlt, lastList);
+    for (const p of lastPick) { const a = p.ref.d; p.lat = a.lat; p.lng = a.lng; p.alt = a._alt ?? p.alt; }
+    lastPick.__v = now; // the click index for planes is rebuilt next time markers are laid out
+  } else if (sel) glideTo([sel], now); // the selected plane's numbers and the follow camera stay exact
+  return sel;
 }
 export const flightsNow = () => lastList;
 
@@ -153,17 +159,38 @@ function planeGeometry() {
   s.closePath();
   return new THREE.ShapeGeometry(s);
 }
+// Planes glide on the GPU: each instance carries its velocity, and the vertex shader moves it by
+// velocity × seconds since the last layout. Motion is perfectly smooth at any frame rate and costs
+// nothing on the CPU; the CPU only re-bases positions every few seconds.
+const glide = { value: 0 }; let layoutAt = performance.now();
+const KT_TO_UNITS_PER_S = 0.514444 / 1000 / (6371 / R); // knots → globe units per second
 function ensureMesh() {
   if (mesh) return mesh;
-  mesh = new THREE.InstancedMesh(planeGeometry(), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }), MAX);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uDt = glide;
+    sh.vertexShader = `attribute vec3 instanceVel;\nuniform float uDt;\n${sh.vertexShader.replace('#include <project_vertex>', `vec4 mvPosition = vec4( transformed, 1.0 );
+#ifdef USE_INSTANCING
+  mvPosition = instanceMatrix * mvPosition;
+  mvPosition.xyz += instanceVel * uDt;
+#endif
+mvPosition = modelViewMatrix * mvPosition;
+gl_Position = projectionMatrix * mvPosition;`)}`;
+  };
+  mat.customProgramCacheKey = () => 'terra-plane-glide';
+  mesh = new THREE.InstancedMesh(planeGeometry(), mat, MAX);
   mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX * 3), 3);
+  mesh.geometry.setAttribute('instanceVel', new THREE.InstancedBufferAttribute(new Float32Array(MAX * 3), 3).setUsage(THREE.DynamicDrawUsage));
   mesh.frustumCulled = false; mesh.count = 0; mesh.renderOrder = 5; mesh.raycast = () => {};
+  mesh.onBeforeRender = () => { glide.value = Math.min(30, (performance.now() - layoutAt) / 1000); };
   return mesh;
 }
 const tmp = { m: new THREE.Matrix4(), p: new THREE.Vector3(), n: new THREE.Vector3(), e: new THREE.Vector3(), u: new THREE.Vector3(), d: new THREE.Vector3(), r: new THREE.Vector3(), c: new THREE.Color() };
 export const EMERGENCY = new Set(['7500', '7600', '7700', 7500, 7600, 7700]);
 const altColor = (ft, ground) => (ground ? '#8aa0b3' : ft < 10000 ? '#7ed6c4' : ft < 25000 ? '#ffd37a' : '#f2f5f7');
-const exaggeration = (camAlt) => 1 + Math.min(30, camAlt * 14);
+// Heights are exaggerated so you can see them, but only gently from far away (planes floating hundreds of
+// km up made a fuzzy halo around the planet's edge).
+const exaggeration = (camAlt) => 1 + Math.min(8, camAlt * 5);
 
 /** Place every plane. Size follows the camera so pointers stay a readable size on screen.
     Written straight into the instance buffers with plain maths (no per-plane library calls), because it
@@ -173,9 +200,11 @@ const colorCache = new Map();
 const rgbOf = (hex) => { let c = colorCache.get(hex); if (!c) { tmp.c.set(hex); c = [tmp.c.r, tmp.c.g, tmp.c.b]; colorCache.set(hex, c); } return c; };
 export function layoutPlanes(globe, camAlt, list = lastList) {
   const m = ensureMesh(); lastList = list;
-  const size = Math.max(0.0012, Math.min(1.6, camAlt * R * 0.014));
+  glideTo(list, Date.now()); // start from where each plane is now, so a re-layout never makes planes jump back
+  const size = Math.max(0.0012, Math.min(1.3, camAlt * R * 0.0115));
   const ex = exaggeration(camAlt);
-  const M = m.instanceMatrix.array; const C = m.instanceColor.array;
+  const M = m.instanceMatrix.array; const C = m.instanceColor.array; const V = m.geometry.attributes.instanceVel.array;
+  layoutAt = performance.now(); glide.value = 0;
   let i = 0;
   for (const a of list) {
     if (i >= MAX) break;
@@ -197,11 +226,13 @@ export function layoutPlanes(globe, camAlt, list = lastList) {
     M[o + 12] = ux * rr; M[o + 13] = uy * rr; M[o + 14] = uz * rr; M[o + 15] = 1;
     const col = rgbOf(sel ? '#f07a63' : em ? '#ff3b30' : altColor(a.altFt, a.ground));
     C[i * 3] = col[0]; C[i * 3 + 1] = col[1]; C[i * 3 + 2] = col[2];
+    const v = a.ground || !a.kt ? 0 : a.kt * KT_TO_UNITS_PER_S; V[i * 3] = dx * v; V[i * 3 + 1] = dy * v; V[i * 3 + 2] = dz * v;
     a._alt = alt; i += 1;
   }
   m.count = i;
   const im = m.instanceMatrix; im.clearUpdateRanges?.(); im.addUpdateRange?.(0, Math.max(16, i * 16)); im.needsUpdate = true;
   const c = m.instanceColor; c.clearUpdateRanges?.(); c.addUpdateRange?.(0, Math.max(3, i * 3)); c.needsUpdate = true;
+  const va = m.geometry.attributes.instanceVel; va.clearUpdateRanges?.(); va.addUpdateRange?.(0, Math.max(3, i * 3)); va.needsUpdate = true;
 }
 
 // --------------------------------------------------------------- enrichment (adsbdb)
