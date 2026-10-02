@@ -340,8 +340,13 @@ export const LAYERS = [
   {
     id: 'cables', group: 'infra', label: 'Undersea cables', swatch: '#7ed6c4', on: true, sources: ['worldmonitor', 'telegeography'],
     async load() { return (await worldMonitorData()).cables; },
-    channels(cs) {
-      return { paths: cs.map((c) => ({ pts: lonLatToLatLng(c.points).map(([a, b]) => [a, b, 0.0025]), color: c.major ? 'rgba(126,214,196,0.95)' : 'rgba(126,214,196,0.55)', stroke: c.major ? 0.55 : 0.35, animate: true, tip: tip(c.name, c.rfsYear ? `in service ${c.rfsYear}` : 'submarine cable'), ref: { layer: 'cables', d: c } })) };
+    // All cables in one draw call (fatlines.js); hover and click find the nearest line segment.
+    channels(cs, ctx) {
+      if (!cs._fat) {
+        cs._fat = ctx.fatLines(cs.map((c) => ({ pts: lonLatToLatLng(c.points), color: c.major ? '#6fcab9' : '#3f8a7e', width: c.major ? 1.6 : 1.1, alt: 0.0025 })));
+        cs._set = { segs: cs._fat.segs, items: cs.map((c) => ({ ref: { layer: 'cables', d: c }, tip: tip(c.name, c.rfsYear ? `in service ${c.rfsYear}` : 'submarine cable') })) };
+      }
+      return { custom: [cs._fat], lines: [cs._set] };
     },
     describe(c) {
       return {
@@ -361,8 +366,13 @@ export const LAYERS = [
   {
     id: 'pipelines', group: 'infra', label: 'Pipelines', swatch: '#c9803e', on: false, sources: ['worldmonitor'],
     async load() { return (await worldMonitorData()).pipelines; },
-    channels(ps) {
-      return { paths: ps.map((p) => ({ pts: lonLatToLatLng(p.points).map(([a, b]) => [a, b, 0.003]), color: PIPE_COLORS[p.type] ?? '#c9803e', stroke: 0.45, dash: p.status === 'operating' ? null : [0.01, 0.006], tip: tip(p.name, `${p.type} · ${p.status}`), ref: { layer: 'pipelines', d: p } })) };
+    channels(ps, ctx) {
+      if (!ps._fat) {
+        // planned or paused lines are drawn thinner and darker instead of dashed
+        ps._fat = ctx.fatLines(ps.map((p) => ({ pts: lonLatToLatLng(p.points), color: p.status === 'operating' ? PIPE_COLORS[p.type] ?? '#c9803e' : '#6d5a44', width: p.status === 'operating' ? 2 : 1.2, alt: 0.003 })));
+        ps._set = { segs: ps._fat.segs, items: ps.map((p) => ({ ref: { layer: 'pipelines', d: p }, tip: tip(p.name, `${p.type} · ${p.status}`) })) };
+      }
+      return { custom: [ps._fat], lines: [ps._set] };
     },
     describe(p) {
       return { title: p.name, sub: `${p.type} pipeline · ${p.status}`, rows: [['Capacity', p.capacity ?? '—'], ['Length', p.length ?? '—'], ['Operator', p.operator ?? '—'], ['Countries', p.countries?.join(', ') ?? '—']], links: [wiki(p.name)] };

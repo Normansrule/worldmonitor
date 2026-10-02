@@ -56,6 +56,8 @@ export function installLive(api) {
     const kinds = ['all', ...new Set(items.map((i) => i.kind))];
     const list = items.filter((i) => filter === 'all' || i.kind === filter);
     api.openNotes('Live now', `
+      ${api.liveOverview?.() ?? ''}
+      <h4>Feed</h4>
       <p class="sub">What is happening on the planet, newest first. Click any item to fly there.</p>
       <div class="row"><button class="btn" data-livetour="start">${tour ? 'Stop live tour' : 'Start live tour'}</button><button class="btn ghost" data-wall="1">Camera wall for this view</button></div>
       <div class="opts">${kinds.map((k) => `<button class="chip" data-livefilter="${esc(k)}" aria-pressed="${k === filter}">${esc(k === 'all' ? 'Everything' : k)}</button>`).join('')}</div>

@@ -12,6 +12,10 @@ import { TOURS } from './tours.js';
 import { moonLayer } from './moon.js';
 import { installExtras, waterName } from './extras.js';
 import { installSky } from './sky.js';
+import { buildFatLines, nearestLine } from './fatlines.js';
+import { createPulses } from './pulses.js';
+import { installShell, SECTION_FOR_KEY, SECTION_FOR_TITLE } from './shell.js';
+const pulses = createPulses(100);
 import { Quiz, buildQuestionPool } from './quiz.js';
 import { flightsLayer, flightState, layoutPlanes, deckAction, glidePlanes, flightsNow } from './flights.js';
 import { camerasLayer, alprLayer, stopCameraMedia, alprRow } from './cameras.js';
@@ -30,7 +34,7 @@ import { launchesLayer, alertsLayer, countdown } from './launches.js';
 import { installTrace } from './trace.js';
 import { windLayer } from './wind.js';
 import { smallCircle } from './astro.js';
-export const VERSION = '1.10';
+export const VERSION = '1.11';
 const NEW_VERSION = (() => { try { return localStorage.getItem('terra-atlas-version') !== VERSION; } catch { return false; } })();
 
 import { glyphSvg } from './icons.js';
@@ -40,7 +44,7 @@ const layerGlyph = (l) => LAYER_GLYPH[l.id] ?? (typeof l.pin === 'string' ? l.pi
 /** The symbol for one item (a wildfire → flame, a tanker → tanker…). */
 const itemGlyph = (ref) => { const l = ref && layerById[ref.layer]; if (!l) return null; try { return (typeof l.pin === 'function' ? l.pin(ref.d) : l.pin) ?? layerGlyph(l); } catch { return layerGlyph(l); } };
 import { orbitOf } from './layers.js';
-import { passes } from './satellites.js';
+import { passes, positions as satPositions } from './satellites.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -230,7 +234,9 @@ const nav = installNavigation({ globe, R, $, reduceMotion, onLocate: (lat, lng) 
   loader.load('textures/earth-blue-marble.jpg', (t) => { dayNightMaterial.uniforms.dayTexture.value = t; });
   loader.load('textures/earth-night.jpg', (t) => { dayNightMaterial.uniforms.nightTexture.value = t; });
 });
-window.addEventListener('resize', () => globe.width(innerWidth).height(innerHeight));
+// The globe fills the stage between the drawers; it is resized whenever a drawer opens or closes.
+const stageSize = { w: innerWidth, h: innerHeight };
+{ const gEl = $('#globe'); const fit = () => { const w = gEl.clientWidth; const h = gEl.clientHeight; if (!w || !h || (w === stageSize.w && h === stageSize.h && globe.width() === w)) return; stageSize.w = w; stageSize.h = h; globe.width(w).height(h); markers?.setViewport(h); perf?.refit?.(); gov?.wake(600); }; new ResizeObserver(() => requestAnimationFrame(fit)).observe(gEl); requestAnimationFrame(fit); }
 
 function restylePolygons() {
   globe.polygonCapColor((d) => (d.country ? (d.country === state.hover ? 'rgba(227,181,91,0.20)' : 'rgba(0,0,0,0)') : val(d.cap, d)));
@@ -241,6 +247,7 @@ function restylePolygons() {
 function setBase(base) {
   state.base = base; state.detailTiles = null;
   document.querySelectorAll('[data-base]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.base === base)));
+  viewLabel();
   applyBase();
   refreshLayer('sun');
   writeHash();
@@ -265,6 +272,13 @@ function applyBase() {
 }
 
 // ------------------------------------------------------------------ layers: load + compose
+function flightsChip(d) {
+  const el = document.getElementById('flights-chip'); if (!el) return;
+  el.hidden = !d?.ac?.length || !state.on.has('aircraft');
+  if (el.hidden) return;
+  const age = d.snapshotAge != null ? ` <small>${d.snapshotAge < 1.5 ? 'just now' : `${Math.round(d.snapshotAge)} min old`}</small>` : ' <small>live</small>';
+  el.innerHTML = `${glyphSvg('plane', '#8ecbff', 16)} ${d.ac.length.toLocaleString()}${age}`;
+}
 async function refreshLayer(id, { soft = false } = {}) {
   const l = layerById[id];
   if (!l || !state.on.has(id)) return;
@@ -278,6 +292,7 @@ async function refreshLayer(id, { soft = false } = {}) {
     state.loadedAt[id] = Date.now();
     const snap = data && (data.snapshot || Object.values(data).some?.((g) => g?.snapshot));
     setLStatus(id, 'ok', data?.statusNote ?? (snap ? 'Live source unreachable — showing the bundled snapshot' : ''));
+    if (id === 'aircraft') flightsChip(data);
     if (state.pendingSel) setTimeout(() => trySharedSel(id), 0);
   } catch (err) {
     console.warn(err);
@@ -290,7 +305,8 @@ const viewOf = (pov) => {
   const a = pov.altitude; const horizon = Math.acos(1 / (1 + a)) * astro.R_EARTH_KM; // km to the horizon
   return { lat: pov.lat, lng: pov.lng, altitude: a, radiusKm: Math.min(horizon, a * astro.R_EARTH_KM * 0.95 + 5) };
 };
-const ctx = () => ({ now: clock.date(), live: clock.isLive(), base: state.base, hover: state.hover, pov: state.pov, view: viewOf(state.pov), outlineMesh, globe, THREE });
+const fatLines = (lines, opts) => buildFatLines((a, b, c) => globe.getCoords(a, b, c), lines, opts);
+const ctx = () => ({ now: clock.date(), live: clock.isLive(), base: state.base, hover: state.hover, pov: state.pov, view: viewOf(state.pov), outlineMesh, fatLines, globe, THREE });
 
 const meshCache = {};
 function outlineMesh(key, features, color = 0xeef3f6, opacity = 0.3, alt = 0.004) {
@@ -331,7 +347,7 @@ function scheduleCompose() { if (composeQueued) return; composeQueued = true; re
 // push(...big) overflows the call stack past ~100,000 items (the full plate-reader and camera sets do), so append in a loop
 function appendAll(dst, src) { for (let i = 0; i < src.length; i++) dst.push(src[i]); }
 function compose() {
-  const acc = { points: [], rings: [], paths: [], arcs: [], polygons: [], labels: [], particles: [], html: [], custom: [], pick: [], hexes: [] };
+  const acc = { points: [], rings: [], paths: [], arcs: [], polygons: [], labels: [], particles: [], html: [], custom: [], pick: [], hexes: [], lines: [] };
   for (const l of LAYERS) {
     if (!state.on.has(l.id)) continue;
     const ch = state.chan[l.id];
@@ -339,6 +355,7 @@ function compose() {
     for (const k of Object.keys(acc)) if (ch[k]) appendAll(acc[k], ch[k]);
   }
   for (const k of Object.keys(state.tool)) appendAll(acc[k], state.tool[k]);
+  if (acc.rings.length) acc.custom.push(pulses.wrap); // all pulsing rings: one GPU-animated object (pulses.js)
   compose.animating = acc.rings.length > 0 || acc.particles.length > 0 || acc.arcs.some((a) => a.animMs) || acc.paths.some((p) => p.animMs);
   gov?.wake(500);
   document.body.classList.toggle('close', state.pov.altitude < 0.025);
@@ -394,7 +411,7 @@ function markerPass(acc) {
       const isSel = !!selD && c.p.ref?.d === selD;
       if (!isSel && (pins.length >= q.pins || (perLayer[c.l.id] ?? 0) >= q.pinsPerLayer)) { cols.push(c.p); continue; }
       const sc = globe.getScreenCoords(c.p.lat, c.p.lng, markers.floatAlt);
-      if (!sc || sc.x < -40 || sc.y < -40 || sc.x > innerWidth + 40 || sc.y > innerHeight + 40) { cols.push(c.p); continue; }
+      if (!sc || sc.x < -40 || sc.y < -40 || sc.x > stageSize.w + 40 || sc.y > stageSize.h + 40) { cols.push(c.p); continue; }
       const hitsCard = cards.some((r) => sc.x + 14 > r.x0 && sc.x - 14 < r.x1 && sc.y + 14 > r.y0 && sc.y - 14 < r.y1);
       const near = placed.find((o) => Math.abs(o.x - sc.x) < 22 && Math.abs(o.y - sc.y) < 26) ?? (hitsCard ? placed.reduce((b, o) => (!b || Math.hypot(o.x - sc.x, o.y - sc.y) < Math.hypot(b.x - sc.x, b.y - sc.y) ? o : b), null) : null);
       if (near && !isSel) { near.pin.more = (near.pin.more ?? 0) + 1; if (v.altitude > 0.3 && !far) cols.push(c.p); else state.clustered.push(c.p); continue; } // up close the "+N" badge stands in for the column
@@ -503,9 +520,9 @@ function cullSprites() {
 }
 const plainTip = (t) => String(t ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
 const SETTERS = {
-  rings: (d) => globe.ringsData(d), paths: (d) => globe.pathsData(d), arcs: (d) => globe.arcsData(d),
+  rings: (d) => pulses.set(d), paths: (d) => globe.pathsData(d), arcs: (d) => globe.arcsData(d),
   polygons: (d) => globe.polygonsData(d), particles: (d) => globe.particlesData(d),
-  html: (d) => globe.htmlElementsData(d), custom: (d) => globe.customLayerData(d), pick: () => {},
+  html: (d) => globe.htmlElementsData(d), custom: (d) => globe.customLayerData(d), pick: () => {}, lines: (d) => { state.lineSets = d; },
   hexes: (d) => globe.hexBinResolution(state.pov.altitude < 0.006 ? 9 : state.pov.altitude < 0.02 ? 8 : state.pov.altitude < 0.07 ? 7 : 6).hexBinPointsData(d),
 };
 
@@ -557,10 +574,18 @@ const PRESETS = [
 state.pending = new Map();
 function renderLayerPanel() {
   const presets = `<div class="presets" role="group" aria-label="Quick presets">${PRESETS.map(([n], i) => `<button class="chip" data-preset="${i}">${esc(n)}</button>`).join('')}<button class="chip" data-preset="clear">Clear all</button></div>`;
-  const html = presets + GROUPS.map((g) => `
-    <section class="group"><h3>${esc(g.label)}${g.note ? `<small>${esc(g.note)}</small>` : ''}</h3>
-      ${LAYERS.filter((l) => l.group === g.id).map((l) => `
-        <div class="layer" style="--sw:${l.swatch}">
+  const wantOn = (l) => (state.pending.has(l.id) ? state.pending.get(l.id) : state.on.has(l.id));
+  const active = LAYERS.filter((l) => state.on.has(l.id));
+  // "On the map": every active layer as a chip you can switch off in one click
+  const activeHtml = `<div class="active-layers"><div class="al-head"><b>On the map</b><small>${active.length} layer${active.length === 1 ? '' : 's'}</small></div>
+    <div class="al-list">${active.map((l) => `<button class="al" data-off="${l.id}" title="Hide ${esc(l.label)}" style="--sw:${l.swatch}">${layerGlyph(l) ? glyphSvg(layerGlyph(l), l.swatch, 14) : '<i class="dot"></i>'}<span>${esc(l.label.replace(/ \(.*\)$/, ''))}</span><b aria-hidden="true">×</b></button>`).join('') || '<span class="muted">Nothing yet: tick a layer below or pick a preset.</span>'}</div></div>`;
+  const html = activeHtml + presets + GROUPS.map((g) => {
+    const ls = LAYERS.filter((l) => l.group === g.id); const nOn = ls.filter((l) => state.on.has(l.id)).length;
+    const collapsed = state.collapsed.has(g.id);
+    return `
+    <section class="group${collapsed ? ' collapsed' : ''}" data-group="${g.id}"><h3><button class="gtoggle" data-gtoggle="${g.id}" aria-expanded="${!collapsed}"><i aria-hidden="true">▾</i>${esc(g.label)}</button><small>${nOn ? `${nOn} on · ` : ''}${ls.length}${g.note ? ` · ${esc(g.note)}` : ''}</small></h3>
+      ${ls.map((l) => `
+        <div class="layer${wantOn(l) ? ' is-on' : ''}" style="--sw:${l.swatch}" data-name="${esc(`${l.label} ${g.label}`.toLowerCase())}">
           <input type="checkbox" id="ly-${l.id}" data-layer="${l.id}" ${(state.pending.has(l.id) ? state.pending.get(l.id) : state.on.has(l.id)) ? 'checked' : ''}/>
           <label class="sw" for="ly-${l.id}" aria-hidden="true"></label>
           <label for="ly-${l.id}">${layerGlyph(l) ? glyphSvg(layerGlyph(l), l.swatch, 17) : ''}${esc(l.label)}${l.fresh ? ' <em class="new">new</em>' : ''}${state.pending.has(l.id) ? ' <em class="pend">' + (state.pending.get(l.id) ? 'will show' : 'will hide') + '</em>' : ''}<span class="cnt" data-count="${l.id}">${state.on.has(l.id) ? countOf(l.id) : ''}</span></label>
@@ -570,12 +595,21 @@ function renderLayerPanel() {
           ${legendChips(l)}
           <p class="lnote" data-lnote="${l.id}" data-s="${state.lstatus[l.id]?.s ?? ''}" ${state.on.has(l.id) && state.lstatus[l.id]?.note && state.lstatus[l.id]?.s !== 'loading' ? '' : 'hidden'}>${esc(state.lstatus[l.id]?.note ?? '')}</p>
         </div>`).join('')}
-    </section>`).join('');
+    </section>`; }).join('');
   $('#layer-list').innerHTML = html;
+  filterLayers();
   const n = state.pending.size;
   $('#apply-bar').hidden = n === 0;
   $('#apply-count').textContent = `${n} change${n === 1 ? '' : 's'} ready`;
 }
+// Layer filter (the box above the list): hides non-matching rows without re-rendering, so typing stays smooth.
+function filterLayers() {
+  const q = ($('#layer-filter')?.value ?? '').trim().toLowerCase(); const list = $('#layer-list');
+  list.classList.toggle('filtering', !!q);
+  list.querySelectorAll('.layer').forEach((el) => { el.hidden = !!q && !el.dataset.name.includes(q); });
+  list.querySelectorAll('.group').forEach((g) => { g.hidden = !!q && !g.querySelector('.layer:not([hidden])'); });
+}
+state.collapsed = (() => { try { return new Set(JSON.parse(localStorage.getItem('terra-atlas-collapsed') ?? '[]')); } catch { return new Set(); } })();
 function applyPending() {
   if (!state.pending.size) return;
   const shown = []; const hidden = [];
@@ -612,6 +646,9 @@ $('#layer-list').addEventListener('change', (e) => {
   if (lid) { state.opts[lid][oid] = e.target.value; delete state.data[lid]; refreshLayer(lid); }
 });
 $('#layer-list').addEventListener('click', (e) => {
+  const off = e.target.closest('[data-off]'); if (off) { toggleLayer(off.dataset.off, false); renderLayerPanel(); toast(`Hidden: ${layerById[off.dataset.off].label}`); return; }
+  const gt = e.target.closest('[data-gtoggle]');
+  if (gt) { const id = gt.dataset.gtoggle; if (state.collapsed.has(id)) state.collapsed.delete(id); else state.collapsed.add(id); try { localStorage.setItem('terra-atlas-collapsed', JSON.stringify([...state.collapsed])); } catch { /* ignore */ } gt.closest('.group').classList.toggle('collapsed'); gt.setAttribute('aria-expanded', String(!state.collapsed.has(id))); return; }
   const pr = e.target.closest('[data-preset]'); if (pr) return preset(pr.dataset.preset === 'clear' ? 'clear' : Number(pr.dataset.preset));
   const learn = e.target.closest('[data-learn]');
   if (learn) return showLearn(learn.dataset.learn);
@@ -630,22 +667,36 @@ function toggleLayer(id, on, { quiet = false } = {}) {
   updateShade();
   const cb = document.getElementById(`ly-${id}`); if (cb) cb.checked = on;
   renderChips(id); const ln = document.querySelector(`[data-lnote="${id}"]`); if (ln && !on) ln.hidden = true;
+  if (id === 'aircraft') flightsChip(on ? state.data.aircraft : null);
   if (on) refreshLayer(id); else compose();
   writeHash();
 }
 
 // ------------------------------------------------------------------ field notes
 function openNotes(title, html, key = null) {
+  // Sections (live feed, saved views, about, the tours list) open in the left drawer; details in the right one.
+  const sect = (key && SECTION_FOR_KEY[key]) || SECTION_FOR_TITLE[title];
+  if (sect && shell) { shell.show(sect, title, html, key ?? `section:${sect}`); return; }
   stopCameraMedia();
   state.notesKey = key;
   if (!key?.startsWith('flight:')) { flightState.selected = null; flightState.follow = false; }
   $('#notes-title').textContent = title;
   $('#notes-body').innerHTML = html;
-  $('#notes').classList.add('open');
+  $('#notes').classList.add('open'); document.body.classList.add('right-open');
+  // Back history: each card remembers how to reopen itself (a fresh copy, so live numbers stay live).
+  const reopen = state.reopen ?? (() => openNotes(title, html, key)); state.reopen = null;
+  if (state.histNav) state.histNav = false;
+  else if (!key?.startsWith('flight:') || detailsHist.at(-1)?.key !== key) { detailsHist.push({ title, key, fn: reopen }); if (detailsHist.length > 30) detailsHist.shift(); }
+  updateBack();
+  // On narrower windows only one drawer at a time, so the globe never gets squeezed to a sliver.
+  if (innerWidth < 1280 && document.body.classList.contains('left-open')) { shell?.close(); state.leftAuto = innerWidth > 860; }
   $('#notes-body').scrollTop = 0;
 }
-function closeNotes() { $('#notes').classList.remove('open'); stopCameraMedia(); state.notesKey = null; setTimeout(writeHash, 0); if (state.selected) { state.selected = null; compose.forceMarkers = true; scheduleCompose(); } if (flightState.selected) { flightState.selected = null; flightState.follow = false; refreshLayer('aircraft', { soft: true }); } }
-const isOpen = (key) => state.notesKey === key && $('#notes').classList.contains('open');
+const detailsHist = [];
+function updateBack() { const b = $('#notes-back'); if (!b) return; b.hidden = detailsHist.length < 2; if (!b.hidden) b.title = `Back to ${detailsHist.at(-2).title}`; }
+function detailsBack() { if (detailsHist.length < 2) return; detailsHist.pop(); const prev = detailsHist.at(-1); state.histNav = true; prev.fn(); updateBack(); }
+function closeNotes() { detailsHist.length = 0; updateBack(); $('#notes').classList.remove('open'); document.body.classList.remove('right-open'); if (state.leftAuto) { state.leftAuto = false; shell?.open(shell.current()); } stopCameraMedia(); state.notesKey = null; setTimeout(writeHash, 0); if (state.selected) { state.selected = null; compose.forceMarkers = true; scheduleCompose(); } if (flightState.selected) { flightState.selected = null; flightState.follow = false; refreshLayer('aircraft', { soft: true }); } }
+const isOpen = (key) => (state.notesKey === key && $('#notes').classList.contains('open')) || !!shell?.isOpen(key);
 const linksHtml = (links) => (links?.length ? `<div class="links">${links.filter((l) => l.url).map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}</a>`).join('')}</div>` : '');
 const rowsHtml = (rows) => (rows?.length ? `<dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : '');
 const refsHtml = (ids) => `<ul class="sources">${ids.map((i) => SOURCES[i]).filter(Boolean).map((s) => `<li><a href="${s.url}" target="_blank" rel="noopener">${esc(s.name)}</a><small>${esc(s.license)}</small></li>`).join('')}</ul>`;
@@ -656,6 +707,7 @@ function select(ref) {
   if (!l?.describe) return showLearn(ref.layer);
   const c = l.describe(ref.d);
   state.selected = ref; compose.forceMarkers = true; scheduleCompose();
+  state.reopen = () => select(ref);
   const key = `sel:${ref.layer}:${c.title}`;
   openNotes(l.label, `
     <div id="sel-wiki"></div>
@@ -758,8 +810,10 @@ function showLearn(id) {
     ${id === 'stations' ? '<p><button class="btn" data-ride="on">Ride along with the ISS</button></p>' : ''}
     <h4>Sources and further reading</h4>${refsHtml(l.learn.refs)}`);
 }
-$('#notes-body').addEventListener('click', (e) => {
+document.addEventListener('click', (e) => {
+  if (!e.target.closest?.('#notes-body, .sect-body')) return;
   const t = e.target.closest('button'); if (!t) return;
+  if (t.dataset.whatsnew) whatsNew();
   if (t.dataset.learnMore) showLearn(t.dataset.learnMore);
   if (t.dataset.enable) { toggleLayer(t.dataset.enable, true); showLearn(t.dataset.enable); }
   if (t.dataset.tour) { if (state.mode !== 'tours') setMode('tours'); startTour(t.dataset.tour); }
@@ -781,7 +835,7 @@ $('#notes-body').addEventListener('click', (e) => {
 document.addEventListener('click', (e) => { const gf = e.target.closest('[data-gfilter]'); if (gf) { const [lid, g] = gf.dataset.gfilter.split(':'); toggleGlyph(lid, g); } });
 document.addEventListener('click', (e) => { if (e.target.closest('[data-open-about]')) { e.preventDefault(); setMode('about'); } });
 document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => {
-  if (b.dataset.close === 'notes') { closeNotes(); if (state.mode) setMode(null); } else $('#layers').classList.remove('open');
+  if (b.dataset.close === 'notes') { closeNotes(); if (state.mode) setMode(null); } else shell?.close();
 }));
 
 // ------------------------------------------------------------------ surface clicks: probe + country card
@@ -866,6 +920,7 @@ async function lookAround(lat, lng, token) {
 const WMO = { 0: 'Clear', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast', 45: 'Fog', 48: 'Rime fog', 51: 'Light drizzle', 53: 'Drizzle', 55: 'Heavy drizzle', 61: 'Light rain', 63: 'Rain', 65: 'Heavy rain', 66: 'Freezing rain', 67: 'Heavy freezing rain', 71: 'Light snow', 73: 'Snow', 75: 'Heavy snow', 77: 'Snow grains', 80: 'Rain showers', 81: 'Heavy showers', 82: 'Violent showers', 85: 'Snow showers', 86: 'Heavy snow showers', 95: 'Thunderstorm', 96: 'Thunderstorm with hail', 99: 'Severe thunderstorm with hail' };
 
 function probeCard(lat, lng) {
+  state.reopen = () => probeCard(lat, lng);
   openNotes('Point probe', `<h3>This spot on Earth</h3>${probeHtml(lat, lng)}`);
   fillProbe(lat, lng);
 }
@@ -878,6 +933,7 @@ const WB = [['NY.GDP.MKTP.CD', 'GDP (current US$)', (v) => `$${(v / 1e9).toLocal
 
 async function countryCard(f, lat, lng) {
   const p = f.properties; const cc = p['ISO3166-1-Alpha-2']; const name = p.name;
+  state.reopen = () => countryCard(f, lat, lng);
   openNotes('Country', `<h3><span class="flag">${flagOf(cc)}</span>${esc(name)}</h3>
     <div id="cc-facts" class="muted">Loading facts…</div><div id="cc-wb"></div><div id="cc-wiki"></div>
     <h4>The point you clicked</h4>${probeHtml(lat, lng)}`);
@@ -1019,7 +1075,7 @@ function aboutPanel() {
     <div class="credit"><p><b>Terra Atlas is built on <a href="https://github.com/koala73/worldmonitor" target="_blank" rel="noopener">World Monitor</a> by Elie Habib.</b>
     Its design, 3D-globe concept, layer catalogue and curated datasets come from that project. This fork adds a static, server-free build for GitHub Pages, live public feeds, deep-zoom tiles, tours, a quiz and teaching notes.</p></div>
     <p>Free software under the <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener">GNU AGPL v3.0</a>. You can read, copy and change the source code of this exact site: <a href="${esc(repo)}" target="_blank" rel="noopener">${esc(repo.replace('https://', ''))}</a>.</p>
-    <h4>Keyboard</h4>${rowsHtml([['C', 'Trace connections'], ['S', 'Area scan'], ['[ ]', 'Time machine slower / faster'], ['\\', 'Back to live time'], ['/', 'Search'], ['R', 'Auto-rotate'], ['1 – 4', 'Normal, night vision, thermal, CRT'], ['L', 'Layers (on small screens)'], ['T · Q · M', 'Tours, quiz, measure'], ['Esc', 'Close panel / leave mode']])}
+    <h4>Keyboard</h4>${rowsHtml([['C', 'Trace connections'], ['S', 'Area scan'], ['[ ]', 'Time machine slower / faster'], ['\\', 'Back to live time'], ['/', 'Search'], ['R', 'Auto-rotate'], ['1 – 4', 'Normal, night vision, thermal, CRT'], ['L', 'Layers'], ['?', 'Keyboard and about'], ['Ctrl+K', 'Find anything: layers, places, flights, tools'], ['T · Q · M', 'Tours, quiz, measure'], ['Esc', 'Close the details, then the section']])}
     <h4>Data, libraries and references</h4>
     <ul class="sources">${Object.values(SOURCES).map((s) => `<li><a href="${s.url}" target="_blank" rel="noopener">${esc(s.name)}</a><small>${esc(s.role)} — ${esc(s.license)}</small></li>`).join('')}</ul>`);
 }
@@ -1052,7 +1108,7 @@ function endTourSilently() {
   for (const l of LAYERS) toggleLayer(l.id, prevOn.has(l.id));
   renderLayerPanel(); setBase(prevBase);
 }
-document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-mode]'); if (b) setMode(b.dataset.mode); });
 document.querySelectorAll('[data-base]').forEach((b) => b.addEventListener('click', () => setBase(b.dataset.base)));
 
 // ------------------------------------------------------------------ search
@@ -1191,12 +1247,18 @@ $('#globe').addEventListener('pointerup', (e) => {
   if (hit?.zoom) { state.hitAt = performance.now(); state.clickConsumed = true; globe.pointOfView({ lat: hit.lat, lng: hit.lng, altitude: Math.max(0.0006, state.pov.altitude / 3) }, reduceMotion ? 0 : 900); toast(`Zooming in on ${hit.more + 1} markers here`); return; }
   if (hit) { state.hitAt = performance.now(); state.clickConsumed = true; select(hit.ref); }
 }, true);
-function kmPerPx() { const fov = (globe.camera().fov * Math.PI) / 180; return Math.max(0.0005, (2 * state.pov.altitude * astro.R_EARTH_KM * Math.tan(fov / 2)) / innerHeight); }
+function kmPerPx() { const fov = (globe.camera().fov * Math.PI) / 180; return Math.max(0.0005, (2 * state.pov.altitude * astro.R_EARTH_KM * Math.tan(fov / 2)) / (stageSize.h || innerHeight)); }
 const occludedFn = () => { const c = globe.camera().position; const cl = c.length(); return (d) => { const w = globe.getCoords(d.lat, d.lng, d.alt ?? 0); return (w.x * c.x + w.y * c.y + w.z * c.z) / (Math.hypot(w.x, w.y, w.z) * cl) < R / cl - 0.002; }; };
 function pickAt(x, y, { elevated = true } = {}) {
   const pin = markers.hitPin(x, y, occludedFn()); if (pin) return pin;
   const g = globe.toGlobeCoords(x, y);
-  if (g) { const n = state.index.nearest(g.lat, g.lng, kmPerPx() * 9); if (n) return n.item; }
+  if (g) {
+    const n = state.index.nearest(g.lat, g.lng, kmPerPx() * 9); if (n) return n.item;
+    // merged line layers (cables, pipelines): the nearest segment within a few pixels
+    let best = null;
+    for (const set of state.lineSets ?? []) { const r = nearestLine(set.segs, g.lat, g.lng, best ? best.km : kmPerPx() * 6); if (r) best = { ...r, set }; }
+    if (best) { const it = best.set.items[best.line]; return { lat: g.lat, lng: g.lng, ref: it.ref, tip: it.tip }; }
+  }
   if (!elevated) return null;
   const cam = globe.camera().position; const cr = cam.length();
   let best = null; let bestD = 11;
@@ -1295,6 +1357,9 @@ setInterval(tickClock, 500); tickClock();
 // ---- time machine controls
 function stepSpeed(dir) { const i = SPEEDS.indexOf(clock.speed); const j = Math.max(0, Math.min(SPEEDS.length - 1, (i < 0 ? SPEEDS.indexOf(1) : i) + dir)); clock.setSpeed(SPEEDS[j]); tickClock(); }
 $('#clock').addEventListener('click', () => { $('#timebar').hidden = !$('#timebar').hidden; });
+// When the time machine is open, lift the zoom buttons above it so the two never overlap.
+{ const tb = $('#timebar'); const mc = document.querySelector('.stage .mapctl'); const lift = () => { if (mc) mc.style.bottom = tb.hidden ? '' : `${tb.offsetHeight + 22}px`; };
+  new ResizeObserver(lift).observe(tb); new MutationObserver(lift).observe(tb, { attributes: true, attributeFilter: ['hidden'] }); }
 $('#time-slower').addEventListener('click', () => stepSpeed(-1));
 $('#time-faster').addEventListener('click', () => stepSpeed(1));
 $('#time-play').addEventListener('click', () => { clock.pause(); tickClock(); });
@@ -1322,17 +1387,18 @@ $('#shot').addEventListener('click', () => {
   a.download = `terra-atlas-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}.png`; a.click();
 });
 $('#brand').addEventListener('click', (e) => { e.preventDefault(); globe.pointOfView({ lat: 18, lng: state.pov.lng, altitude: 2.4 }, reduceMotion ? 0 : 1500); });
-$('#open-layers').addEventListener('click', () => $('#layers').classList.toggle('open'));
+$('#open-layers').addEventListener('click', () => shell?.open('layers'));
 document.addEventListener('keydown', (e) => {
   if (e.target.matches('input, select, textarea')) return;
   if (e.key === '/') { e.preventDefault(); q.focus(); }
   else if (e.key === 'r' || e.key === 'R') toggleSpin();
-  else if (e.key === 'l' || e.key === 'L') $('#layers').classList.toggle('open');
+  else if (e.key === 'l' || e.key === 'L') shell?.open('layers');
+  else if (e.key === '?') shell?.open('about');
   else if (e.key === 't' || e.key === 'T') setMode('tours');
   else if (e.key === 'q' || e.key === 'Q') setMode('quiz');
   else if (e.key === 'm' || e.key === 'M') setMode('measure');
   else if (e.key === 'c' || e.key === 'C') setMode('trace');
-  else if (e.key === 'Escape') { if (state.tour) endTour(); else if (state.mode) setMode(null); else closeNotes(); }
+  else if (e.key === 'Escape') { if (state.tour) endTour(); else if (state.mode) setMode(null); else if (document.body.classList.contains('right-open')) closeNotes(); else return; e.stopImmediatePropagation(); }
 });
 
 // ------------------------------------------------------------------ sensor looks (idea from God's Eye View, MIT)
@@ -1342,10 +1408,17 @@ function setLook(look) {
   document.body.dataset.look = state.look;
   hud?.show(state.look === 'hud');
   document.querySelectorAll('[data-look]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.look === state.look)));
+  viewLabel();
 }
+function viewLabel() {
+  const el = document.getElementById('view-label'); if (!el) return;
+  const b = document.querySelector(`button[data-base="${state.base}"]`)?.textContent ?? 'Map'; const l = document.querySelector(`button[data-look="${state.look}"]`)?.textContent ?? '';
+  el.textContent = `Map: ${b}${l && l !== 'Normal' ? ` · ${l}` : ''}`;
+}
+document.getElementById('view-btn')?.addEventListener('click', () => shell?.open('map'));
 document.querySelectorAll('[data-look]').forEach((b) => b.addEventListener('click', () => setLook(b.dataset.look)));
 document.addEventListener('keydown', (e) => { if (!e.target.matches('input, select, textarea') && /^[1-5]$/.test(e.key)) setLook(LOOKS[Number(e.key) - 1]); });
-let hud = null; let tracer = null; let extras = null; let sky = null;
+let hud = null; let tracer = null; let extras = null; let sky = null; let shell = null;
 $('#gibs-date-input').max = new Date(Date.now() - 24 * 3600_000).toISOString().slice(0, 10);
 $('#gibs-date-input').value = gibsDate();
 $('#gibs-date-input').addEventListener('change', (e) => { state.gibsDate = e.target.value || null; applyBase(); });
@@ -1389,6 +1462,8 @@ setBase(state.base);
 renderLayerPanel();
 for (const id of state.on) refreshLayer(id);
 $('#apply-now').addEventListener('click', applyPending);
+$('#notes-back')?.addEventListener('click', detailsBack);
+$('#layer-filter')?.addEventListener('input', filterLayers);
 $('#apply-undo').addEventListener('click', () => { state.pending.clear(); renderLayerPanel(); });
 const live = installLive(api);
 tracer = installTrace(api);
@@ -1409,6 +1484,27 @@ extras = installExtras({
   whatsNew: () => whatsNew(), layer: (id) => layerById[id], solarElevation: astro.solarElevation, sky: (lat, lng) => sky.open(lat, lng),
 });
 $('#pal-open').addEventListener('click', () => extras.open());
+// Overview tiles at the top of the Live section: the state of the planet at a glance, each one clickable.
+api.liveOverview = () => {
+  const now = clock.date().getTime(); const t = [];
+  const tile = (attrs, glyph, color, label, value, sub) => `<button class="stat" ${attrs}>${glyphSvg(glyph, color, 20)}<span>${esc(label)}</span><b>${value}</b><small>${sub}</small></button>`;
+  const qs = (state.data.quakes ?? []).filter((f) => now - f.properties.time < 86_400_000);
+  if (state.data.quakes) { const top = qs.reduce((b, f) => (!b || f.properties.mag > b.properties.mag ? f : b), null); t.push(tile(top ? `data-fly="${top.geometry.coordinates[1]},${top.geometry.coordinates[0]},1.2"` : 'data-enable="quakes"', 'quake', '#f79d5c', 'Earthquakes, 24 h', qs.length.toLocaleString(), top ? `strongest M${top.properties.mag.toFixed(1)}` : 'none recorded')); }
+  else t.push(tile('data-enable="quakes"', 'quake', '#f79d5c', 'Earthquakes', '—', 'turn on'));
+  const ac = state.data.aircraft; t.push(tile(ac ? 'data-board="1"' : 'data-enable="aircraft"', 'plane', '#8ecbff', 'Aircraft tracked', ac ? ac.ac.length.toLocaleString() : '—', ac ? (ac.snapshotAge != null ? `snapshot ${Math.round(ac.snapshotAge)} min old` : 'live') : 'turn on'));
+  const iss = state.data.stations ? satPositions(state.data.stations, clock.date()).find((p) => /ISS \(ZARYA\)|^ISS$/.test(p.name)) : null;
+  t.push(tile(iss ? 'data-ride="on"' : 'data-enable="stations"', 'sat', '#ffd37a', 'ISS is over', iss ? esc(placeName(iss.lat, iss.lng).replace(/^the /, '')) : '—', iss ? `${Math.round(iss.altKm)} km up · ride along` : 'turn on space stations'));
+  const next = (state.data.launches ?? []).filter((l) => l.net > now - 3600_000).sort((a, b) => a.net - b.net)[0];
+  t.push(tile(next ? `data-fly="${next.lat},${next.lng},1.4"` : 'data-enable="launches"', 'rocket', '#ff9e5e', 'Next launch', next ? countdown(next.net - now) : '—', next ? esc(next.name.split('|').pop().trim()) : 'turn on launches'));
+  const al = state.data.alerts; t.push(tile(al ? 'data-enable="alerts"' : 'data-enable="alerts"', 'alert', '#ff3b30', 'Disaster alerts', al ? `${al.filter((a) => a.level === 'Red').length} red` : '—', al ? `${al.filter((a) => a.level === 'Orange').length} orange` : 'turn on GDACS'));
+  const m = astro.moonState(clock.date()); t.push(tile('data-start="moon"', 'moon', '#e8eef3', 'The Moon', `${Math.round(m.illum * 100)} % lit`, esc(m.name)));
+  const el = astro.solarElevation(state.pov.lat, state.pov.lng, clock.date());
+  t.push(tile('data-tool="sky"', 'sun', '#ffd37a', 'Sun at the view centre', `${Math.round(el)}°`, el > 0 ? 'daytime · see the sky' : el > -6 ? 'twilight · see the sky' : 'night · see the sky'));
+  const nw = state.data.news; t.push(tile(nw ? 'data-enable="news"' : 'data-enable="news"', 'news', '#ff9ec7', 'Places in the news', nw ? (nw.items?.length ?? 0).toLocaleString() : '—', nw ? 'last 24 hours' : 'turn on news'));
+  return `<h4>At a glance</h4><div class="stats-grid">${t.join('')}</div>`;
+};
+shell = installShell({ $, esc, TOURS, closeNotes, closeDetails: () => { state.leftAuto = false; closeNotes(); }, openLive: () => live.openFeed('all'), openSaved: () => extras.viewsPanel(), openAbout: () => aboutPanel(), sky: () => sky.open(state.pov.lat, state.pov.lng), palette: () => extras.open() });
+$('#flights-chip').addEventListener('click', () => extras.flightsBoard());
 // Live countdowns in any open card
 setInterval(() => document.querySelectorAll('.countdown[data-net]').forEach((el) => { el.textContent = countdown(Number(el.dataset.net) - Date.now()); }), 1000);
 perf = installPerformance({ globe, $, toast: (m) => toast(m), onChange: () => { compose.forceMarkers = true; scheduleCompose(); } });
@@ -1421,7 +1517,6 @@ setInterval(() => {
   if (sel && flightState.follow) followTo(sel.lat, sel.lng);
 }, 500);
 // Keep side panels clear of the bottom bar, whose height changes when it wraps on narrower windows.
-{ const bb = document.querySelector('.bottombar'); const setBB = () => document.documentElement.style.setProperty('--bb', `${Math.ceil(bb.getBoundingClientRect().height)}px`); if (bb) { setBB(); new ResizeObserver(setBB).observe(bb); } }
 gov = installIdleGovernor(globe, {
   busy: () => controls.autoRotate || !!state.tour || flightState.follow || !!state.ride,
   animating: () => compose.animating || state.on.has('wind') || state.on.has('aircraft') || !clock.isLive(),
@@ -1432,7 +1527,15 @@ if (NEW_VERSION) { if (!state.pendingSel) setTimeout(whatsNew, 600); try { local
 else if (!location.hash.includes('@') && !isMobile) welcome();
 function whatsNew() {
   const g = (n, c) => glyphSvg(n, c, 26);
-  openNotes(`What’s new in v${VERSION}`, `<h3>Smooth and steady, plus the sky above you</h3>
+  openNotes(`What’s new in v${VERSION}`, `<h3>A cleaner layout where nothing overlaps</h3>
+    <div class="legend">
+      <span>${g('pin', '#e3b55b')}<b>Sections on the left</b> (Layers, Live, Explore, Tools, Saved, About) open one at a time; details of anything you click open on the right. The globe takes the space in between, so panels never cover each other.</span>
+      <span>${g('eye', '#7ed6c4')}<b>Layers:</b> filter by typing, see every active layer in “On the map” (click × to hide one), and fold groups away. Options appear only for layers that are on.</span>
+      <span>${g('news', '#ff9ec7')}<b>Live:</b> an at-a-glance board: earthquakes today, aircraft tracked, where the ISS is, the next launch, disaster alerts, the Moon and the Sun.</span>
+      <span>${g('ix', '#eef3f6')}<b>Tools:</b> measure, trace, sky, area scan, flights board, ride the ISS, time machine, share and save, all in one place. The Details panel has a Back button, and Esc closes panels.</span>
+      <span>${g('bolt', '#ffe066')}<b>Faster:</b> undersea cables and pipelines draw in one batch instead of 90, earthquake pulses animate on the graphics card, and the drawing resolution adapts to your screen size.</span>
+    </div>
+    <h4>From v1.10 — smooth and steady, plus the sky above you</h4>
     <div class="legend">
       <span>${g('sat', '#b7a3ff')}<b>Sky above here:</b> click any spot on the ground, then “Sky above here” for a live chart of the Sun, Moon, satellites and planes overhead.</span>
       <span>${g('plane', '#8ecbff')}Planes now glide on the graphics card, perfectly smooth at any frame rate. Hover a plane for its callsign, height and speed.</span>

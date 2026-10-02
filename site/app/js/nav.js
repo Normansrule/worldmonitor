@@ -24,7 +24,7 @@ export function installNavigation({ globe, R, $, reduceMotion, onLocate }) {
     const el = $('#scalebar'); if (!el) return;
     const fov = (globe.camera().fov * Math.PI) / 180; const hKm = alt * 6371;
     const viewKm = Math.min(2 * hKm * Math.tan(fov / 2), Math.PI * 6371);
-    const kmPerPx = viewKm / innerHeight;
+    const kmPerPx = viewKm / (document.getElementById('globe')?.clientHeight || innerHeight);
     const target = kmPerPx * 110; const pow = 10 ** Math.floor(Math.log10(target));
     const nice = [1, 2, 5, 10].map((m) => m * pow).filter((v) => v <= target).pop() ?? pow;
     el.querySelector('i').style.width = `${Math.round(nice / kmPerPx)}px`;

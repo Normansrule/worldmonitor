@@ -23,6 +23,20 @@ Built on [World Monitor](https://github.com/koala73/worldmonitor) by Elie Habib.
 
 ---
 
+## 🧭 New in v1.11: a layout where nothing overlaps
+
+<img src="site/docs-media/app-layout.jpg" alt="Terra Atlas v1.11: section rail and Live dashboard on the left, the globe in the middle, details of a wildfire on the right, status bar along the bottom" />
+
+| | |
+|---|---|
+| **Fixed regions** | The window is now a fixed layout: a top bar (search, live count, flights count and snapshot age, Find anything), a **section rail** on the left, one section drawer, the globe, a **Details** drawer on the right and a one-line status bar. The globe is resized to the space between the drawers, so panels never cover each other, the zoom buttons or the time machine. An automated check of every chrome element at 1920, 1440, 1280, 1100, 900 and 390 px wide, with details, the time machine, a toast and the Map section open, finds no overlaps. |
+| **Sections** | **Layers** (a filter box, an "On the map" strip where × hides a layer, groups that fold away, and options shown only for layers that are on) · **Map** (base map, sensor look, street-level detail, frame rate) · **Live** (an at-a-glance board, then the feed) · **Explore** (start-here cards, tours, quiz, lessons) · **Tools** (measure, trace, sky, area scan, flights board, ISS ride, flight finder, camera wall, time machine, replay, share, save, picture, spin) · **Saved** · **About**. |
+| **At a glance** | Earthquakes in the last 24 hours (and the strongest), aircraft tracked, where the ISS is right now, a countdown to the next launch, red and orange disaster alerts, the Moon's phase, the Sun's height at the view centre and places in the news. Each tile opens the matching view. |
+| **Easier to move around** | The Details drawer has a **Back** button. Esc closes the details first, then the section. `?` opens the keyboard list. On windows narrower than 1,280 px only one drawer is open at a time, and on phones the rail becomes a tab bar and the drawers become sheets. |
+| **Faster** | Undersea cables and pipelines are drawn as one batch of GPU-widened lines (`fatlines.js`) instead of 90 separate thick-line objects, and earthquake pulses are one GPU-animated object (`pulses.js`) instead of dozens of lines rebuilt every frame. Draw calls with the default layers fell from 157 to 36. The drawing resolution also adapts to a pixel budget (about 4 million pixels on High), so big and high-DPI screens no longer render far more pixels than they need. Long tasks in the zoom-and-drag test fell to one (74 ms). |
+
+---
+
 ## 🌌 New in v1.10: smooth and steady, plus the sky above you
 
 | | |

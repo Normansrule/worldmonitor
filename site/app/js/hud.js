@@ -34,7 +34,7 @@ export function installHud(api) {
     <div class="hud-bl" id="hud-near"></div>
     <button class="hud-scan" id="hud-scan">SCAN AREA <small>(S)</small></button>
     <div class="hud-sweep"></div>`;
-  document.body.appendChild(el);
+  (document.getElementById('stage') ?? document.body).appendChild(el);
 
   function nearby(center, radius) {
     const res = [];

@@ -168,11 +168,12 @@ export class MarkerRenderer {
     this.spriteGroup = new THREE.Group(); this.group.add(this.spriteGroup);
     this.pool = []; this.points = []; this.pins = []; this.labels = [];
     this.base = new Float32Array(0); // per point: px,py,pz, qx,qy,qz,qw
-    this.pixelScale = 1 / (innerHeight * 1.072);
-    addEventListener('resize', () => { this.pixelScale = 1 / (innerHeight * 1.072); this.layoutSprites(); });
+    const h0 = globe.renderer().domElement.clientHeight || innerHeight;
+    this.pixelScale = 1 / (h0 * 1.072); // sprite size is relative to the canvas height (the stage, not the window)
     this.m = new THREE.Matrix4(); this.p = new THREE.Vector3(); this.q = new THREE.Quaternion(); this.s = new THREE.Vector3(); this.up = new THREE.Vector3(0, 0, 1);
   }
   get object() { return this.group; }
+  setViewport(h) { this.pixelScale = 1 / (h * 1.072); this.layoutSprites(); }
   /** Compile the marker shaders up front (in parallel where supported) so the first zoom-in doesn't stall. */
   warm(renderer, scene, camera) {
     this.cols.count = 1; this.cols.setMatrixAt(0, new THREE.Matrix4().makeScale(0.001, 0.001, 0.001));
@@ -187,7 +188,7 @@ export class MarkerRenderer {
   /** How tall columns and how high pins float, relative to the camera height (globe radii).
       Far away they stand tall so you can read them; up close they shrink to the ground so they
       never end up above or behind the camera. */
-  setCamera(camAlt) { this.camAlt = camAlt; this.hScale = Math.max(0.004, Math.min(1, camAlt / 0.8)); this.floatAlt = Math.max(0.0000012, Math.min(0.004, camAlt * 0.015)); }
+  setCamera(camAlt) { this.camAlt = camAlt; this.hScale = Math.max(0.004, Math.min(0.5, camAlt / 1.6)); this.floatAlt = Math.max(0.0000012, Math.min(0.004, camAlt * 0.015)); }
   setPoints(points, zk) {
     const n = Math.min(points.length, this.cap);
     this.points = points; this.base = new Float32Array(n * 7);

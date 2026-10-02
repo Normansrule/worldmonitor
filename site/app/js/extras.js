@@ -147,7 +147,8 @@ export function installExtras(x) {
       ${vs.length ? vs.map((v, i) => `<div class="viewrow"><button class="tour-card" data-view="${i}"><b>${esc(v.name)}</b><span>${v.layers.length} layers · ${esc(v.base)} · saved ${new Date(v.at).toLocaleString()}</span></button><button class="btn ghost" data-view-del="${i}" aria-label="Delete ${esc(v.name)}">Delete</button></div>`).join('') : '<p class="muted">Nothing saved yet.</p>'}
       <p><button class="btn" data-view-save="1">Save the current view</button></p>`, 'views');
   }
-  $('#notes-body').addEventListener('click', (e) => {
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest?.('#notes-body, .sect-body')) return;
     const t = e.target.closest('button'); if (!t) return;
     if (t.dataset.view) goView(readViews()[Number(t.dataset.view)]);
     if (t.dataset.viewDel) { const vs = readViews(); vs.splice(Number(t.dataset.viewDel), 1); writeViews(vs); viewsPanel(); }
@@ -160,7 +161,7 @@ export function installExtras(x) {
   const chip = document.createElement('div');
   chip.id = 'ride'; chip.hidden = true;
   chip.innerHTML = '<span class="ride-dot"></span><div><b>Riding with the ISS</b><small id="ride-txt">…</small></div><button class="btn ghost" id="ride-stop">Stop</button>';
-  document.body.appendChild(chip);
+  (document.getElementById('stage') ?? document.body).appendChild(chip);
   chip.querySelector('#ride-stop').addEventListener('click', () => ride(false));
   let lastTxt = 0; let lastCam = 0;
   function issNow() {

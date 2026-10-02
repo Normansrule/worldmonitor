@@ -4,9 +4,9 @@
 //  • Auto watches the real frame rate and steps down when the device struggles.
 //  • While you drag or zoom, heavy recomputation is postponed until the camera settles.
 export const LEVELS = {
-  high: { label: 'High', dpr: 1.75, pins: 160, pinsPerLayer: 45, cards: 12, labels: 140, columns: 40000, atmosphere: true },
-  balanced: { label: 'Balanced', dpr: 1.25, pins: 100, pinsPerLayer: 30, cards: 8, labels: 90, columns: 15000, atmosphere: true },
-  fast: { label: 'Fast', dpr: 0.85, pins: 50, pinsPerLayer: 15, cards: 5, labels: 50, columns: 6000, atmosphere: false },
+  high: { label: 'High', dpr: 1.75, px: 4.2e6, pins: 160, pinsPerLayer: 45, cards: 12, labels: 140, columns: 40000, atmosphere: true },
+  balanced: { label: 'Balanced', dpr: 1.25, px: 2.8e6, pins: 100, pinsPerLayer: 30, cards: 8, labels: 90, columns: 15000, atmosphere: true },
+  fast: { label: 'Fast', dpr: 0.85, px: 1.6e6, pins: 50, pinsPerLayer: 15, cards: 5, labels: 50, columns: 6000, atmosphere: false },
 };
 const ORDER = ['high', 'balanced', 'fast'];
 
@@ -14,12 +14,20 @@ export function installPerformance({ globe, $, toast, onChange }) {
   const renderer = globe.renderer();
   let mode = 'auto'; try { mode = localStorage.getItem('terra-atlas-quality') ?? 'auto'; } catch { /* private mode */ }
   let level = mode === 'auto' ? (matchMedia('(max-width: 860px)').matches ? 'balanced' : 'high') : mode;
-  const api = { q: { ...LEVELS[level] }, moving };
+  const api = { q: { ...LEVELS[level] }, moving, refit: () => fitPixels() };
+  // Pixel budget: on big or high-DPI screens the drawing buffer is capped (e.g. ~4 million pixels on High),
+  // which is the single biggest factor in GPU load. Text and sprites stay crisp because they are drawn at 2×.
+  function fitPixels() {
+    const el = renderer.domElement; const w = el.clientWidth || innerWidth; const h = el.clientHeight || innerHeight;
+    const budget = Math.sqrt((api.q.px ?? 4e6) / Math.max(1, w * h));
+    const r = Math.max(0.6, Math.min(devicePixelRatio, api.q.dpr, budget));
+    if (Math.abs(renderer.getPixelRatio() - r) > 0.01) renderer.setPixelRatio(r);
+  }
   let lowered = false; let restoreT = null; let slow = 0;
 
   function apply(notify) {
     api.q = { ...LEVELS[level] };
-    renderer.setPixelRatio(Math.min(devicePixelRatio, api.q.dpr));
+    fitPixels();
     globe.showAtmosphere(api.q.atmosphere);
     const sel = $('#quality'); if (sel) sel.value = mode;
     if (notify) toast(`Quality: ${LEVELS[level].label}${mode === 'auto' ? ' (automatic)' : ''}`);
@@ -35,9 +43,10 @@ export function installPerformance({ globe, $, toast, onChange }) {
     if (now - t0 >= 3000) {
       const fps = (frames * 1000) / (now - t0); frames = 0; t0 = now;
       const el = $('#fps'); if (el) el.textContent = `${Math.round(fps)} fps`;
+      const el2 = $('#fps2'); if (el2) el2.textContent = `${Math.round(fps)} frames per second · ${LEVELS[level].label} quality${mode === 'auto' ? ' (automatic)' : ''}`;
       if (mode === 'auto' && !document.hidden && !lowered) {
         slow = fps < 22 ? slow + 1 : 0;
-        if (slow >= 2 && level !== 'fast') { level = ORDER[ORDER.indexOf(level) + 1]; slow = 0; apply(false); toast(`Running slowly — switched to ${LEVELS[level].label} quality. You can change this at the bottom right.`); }
+        if (slow >= 2 && level !== 'fast') { level = ORDER[ORDER.indexOf(level) + 1]; slow = 0; apply(false); toast(`Switched to ${LEVELS[level].label} quality to keep things smooth (change it at the bottom right).`); }
       }
     }
     requestAnimationFrame(loop);
