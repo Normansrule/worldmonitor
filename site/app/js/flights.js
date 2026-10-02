@@ -118,8 +118,30 @@ async function loadFlights(o, ctx) {
     history.set(a.id, h);
   }
   if (history.size > 60000) for (const k of [...history.keys()].slice(0, 20000)) history.delete(k);
+  // Base fix for gliding: between refreshes each plane keeps moving along its heading at its speed.
+  for (const a of res.ac) { a._bLat = a.lat; a._bLng = a.lng; a._bT = now; a.src = res.src; }
   return res;
 }
+
+/** Move every airborne plane forward from its last fix (dead reckoning, at most 3 minutes ahead). */
+function glideTo(list, now) {
+  for (const a of list) {
+    if (a._bT == null || a.ground || !a.kt || a.kt < 50) continue;
+    const hrs = Math.min(now - a._bT, 180_000) / 3.6e6; const km = a.kt * 1.852 * hrs; const h = (a.trk ?? 0) * Math.PI / 180;
+    a.lat = Math.max(-89.5, Math.min(89.5, a._bLat + (km * Math.cos(h)) / 111.2));
+    a.lng = ((a._bLng + (km * Math.sin(h)) / (111.2 * Math.max(0.05, Math.cos(a._bLat * Math.PI / 180))) + 540) % 360) - 180;
+  }
+}
+let lastPick = [];
+/** Called a few times a second: planes glide smoothly instead of jumping at each refresh. */
+export function glidePlanes(globe, camAlt) {
+  if (!lastList.length) return null;
+  glideTo(lastList, Date.now());
+  layoutPlanes(globe, camAlt, lastList);
+  for (const p of lastPick) { const a = p.ref.d; p.lat = a.lat; p.lng = a.lng; p.alt = a._alt ?? p.alt; }
+  return lastList.find((a) => a.id === flightState.selected) ?? null;
+}
+export const flightsNow = () => lastList;
 
 // --------------------------------------------------------------- plane-shaped instanced pointers
 function planeGeometry() {
@@ -143,30 +165,43 @@ export const EMERGENCY = new Set(['7500', '7600', '7700', 7500, 7600, 7700]);
 const altColor = (ft, ground) => (ground ? '#8aa0b3' : ft < 10000 ? '#7ed6c4' : ft < 25000 ? '#ffd37a' : '#f2f5f7');
 const exaggeration = (camAlt) => 1 + Math.min(30, camAlt * 14);
 
-/** Place every plane. Size follows the camera so pointers stay a readable size on screen. */
+/** Place every plane. Size follows the camera so pointers stay a readable size on screen.
+    Written straight into the instance buffers with plain maths (no per-plane library calls), because it
+    runs twice a second for up to 20,000 planes while they glide. */
+const D2R = Math.PI / 180;
+const colorCache = new Map();
+const rgbOf = (hex) => { let c = colorCache.get(hex); if (!c) { tmp.c.set(hex); c = [tmp.c.r, tmp.c.g, tmp.c.b]; colorCache.set(hex, c); } return c; };
 export function layoutPlanes(globe, camAlt, list = lastList) {
   const m = ensureMesh(); lastList = list;
   const size = Math.max(0.0012, Math.min(1.6, camAlt * R * 0.014));
   const ex = exaggeration(camAlt);
+  const M = m.instanceMatrix.array; const C = m.instanceColor.array;
   let i = 0;
   for (const a of list) {
     if (i >= MAX) break;
     const alt = a.ground ? 0.0002 : 0.0004 + (a.altFt / 3281 / 6371) * ex;
-    const P = globe.getCoords(a.lat, a.lng, alt); const Pn = globe.getCoords(a.lat + 0.02, a.lng, alt); const Pe = globe.getCoords(a.lat, a.lng + 0.02, alt);
-    tmp.p.set(P.x, P.y, P.z); tmp.u.copy(tmp.p).normalize();
-    tmp.n.set(Pn.x - P.x, Pn.y - P.y, Pn.z - P.z).normalize(); tmp.e.set(Pe.x - P.x, Pe.y - P.y, Pe.z - P.z).normalize();
-    const h = (a.trk ?? 0) * Math.PI / 180;
-    tmp.d.copy(tmp.n).multiplyScalar(Math.cos(h)).addScaledVector(tmp.e, Math.sin(h)).normalize();
-    tmp.r.crossVectors(tmp.d, tmp.u).normalize();
-    const sel = flightState.selected === a.id; const k = sel || EMERGENCY.has(a.squawk) ? size * 2.2 : size;
-    tmp.m.makeBasis(tmp.r.multiplyScalar(k), tmp.d.multiplyScalar(k), tmp.u.clone().multiplyScalar(k)).setPosition(tmp.p);
-    m.setMatrixAt(i, tmp.m);
-    tmp.c.set(sel ? '#f07a63' : EMERGENCY.has(a.squawk) ? '#ff3b30' : altColor(a.altFt, a.ground)); m.setColorAt(i, tmp.c);
+    // three-globe's convention: phi from the north pole, theta = 90° − longitude
+    const phi = (90 - a.lat) * D2R; const th = (90 - a.lng) * D2R; const rr = R * (1 + alt);
+    const sp = Math.sin(phi); const cp = Math.cos(phi); const st = Math.sin(th); const ct = Math.cos(th);
+    const ux = sp * ct; const uy = cp; const uz = sp * st; // up
+    const ex_ = st; const ez = -ct; // east (y = 0)
+    const nx = -cp * ct; const ny = sp; const nz = -cp * st; // north
+    const h = (a.trk ?? 0) * D2R; const ch = Math.cos(h); const sh = Math.sin(h);
+    const dx = nx * ch + ex_ * sh; const dy = ny * ch; const dz = nz * ch + ez * sh; // nose direction
+    const rx = dy * uz - dz * uy; const ry = dz * ux - dx * uz; const rz = dx * uy - dy * ux; // right wing = nose × up
+    const sel = flightState.selected === a.id; const em = EMERGENCY.has(a.squawk); const k = sel || em ? size * 2.2 : size;
+    const o = i * 16;
+    M[o] = rx * k; M[o + 1] = ry * k; M[o + 2] = rz * k; M[o + 3] = 0;
+    M[o + 4] = dx * k; M[o + 5] = dy * k; M[o + 6] = dz * k; M[o + 7] = 0;
+    M[o + 8] = ux * k; M[o + 9] = uy * k; M[o + 10] = uz * k; M[o + 11] = 0;
+    M[o + 12] = ux * rr; M[o + 13] = uy * rr; M[o + 14] = uz * rr; M[o + 15] = 1;
+    const col = rgbOf(sel ? '#f07a63' : em ? '#ff3b30' : altColor(a.altFt, a.ground));
+    C[i * 3] = col[0]; C[i * 3 + 1] = col[1]; C[i * 3 + 2] = col[2];
     a._alt = alt; i += 1;
   }
   m.count = i;
   const im = m.instanceMatrix; im.clearUpdateRanges?.(); im.addUpdateRange?.(0, Math.max(16, i * 16)); im.needsUpdate = true;
-  if (m.instanceColor) { const c = m.instanceColor; c.clearUpdateRanges?.(); c.addUpdateRange?.(0, Math.max(3, i * 3)); c.needsUpdate = true; }
+  const c = m.instanceColor; c.clearUpdateRanges?.(); c.addUpdateRange?.(0, Math.max(3, i * 3)); c.needsUpdate = true;
 }
 
 // --------------------------------------------------------------- enrichment (adsbdb)
@@ -192,7 +227,8 @@ export function flightsLayer(api) {
     channels(d, ctx) {
       layoutPlanes(ctx.globe, ctx.pov.altitude, d.ac);
       WRAP.obj = ensureMesh();
-      const out = { custom: [WRAP], pick: d.ac.map((a) => ({ lat: a.lat, lng: a.lng, alt: a._alt ?? 0, ref: { layer: 'aircraft', d: { ...a, src: d.src } } })) };
+      lastPick = d.ac.map((a) => ({ lat: a.lat, lng: a.lng, alt: a._alt ?? 0, ref: { layer: 'aircraft', d: a } }));
+      const out = { custom: [WRAP], pick: lastPick };
       const em = d.ac.filter((a) => EMERGENCY.has(a.squawk));
       if (em.length) out.rings = em.map((a) => ({ lat: a.lat, lng: a.lng, color: '#ff3b30', maxR: 1.6, speed: 2, period: 900 }));
       const sel = d.ac.find((a) => a.id === flightState.selected);
@@ -277,6 +313,7 @@ async function openDeck(a, api) {
         <button class="btn" data-deck="follow">Follow this flight</button>
         <button class="btn ghost" data-deck="window">Window view</button>
         <button class="btn ghost" data-deck="stop">Stop following</button>
+        <button class="btn ghost" data-share="1">Copy link</button>
       </div>
       <div id="deck-photo"></div><div id="deck-dest"></div>
       <h4>How the seatback map works</h4>

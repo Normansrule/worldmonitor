@@ -12,7 +12,7 @@ import { TOURS } from './tours.js';
 import { moonLayer } from './moon.js';
 import { installExtras } from './extras.js';
 import { Quiz, buildQuestionPool } from './quiz.js';
-import { flightsLayer, flightState, layoutPlanes, deckAction } from './flights.js';
+import { flightsLayer, flightState, layoutPlanes, deckAction, glidePlanes, flightsNow } from './flights.js';
 import { camerasLayer, alprLayer, stopCameraMedia, alprRow } from './cameras.js';
 import { citiesLayer, airportsLayer } from './places.js';
 import { installNavigation } from './nav.js';
@@ -29,7 +29,7 @@ import { launchesLayer, alertsLayer, countdown } from './launches.js';
 import { installTrace } from './trace.js';
 import { windLayer } from './wind.js';
 import { smallCircle } from './astro.js';
-export const VERSION = '1.8';
+export const VERSION = '1.9';
 const NEW_VERSION = (() => { try { return localStorage.getItem('terra-atlas-version') !== VERSION; } catch { return false; } })();
 
 import { glyphSvg } from './icons.js';
@@ -277,6 +277,7 @@ async function refreshLayer(id, { soft = false } = {}) {
     state.loadedAt[id] = Date.now();
     const snap = data && (data.snapshot || Object.values(data).some?.((g) => g?.snapshot));
     setLStatus(id, 'ok', data?.statusNote ?? (snap ? 'Live source unreachable — showing the bundled snapshot' : ''));
+    if (state.pendingSel) setTimeout(() => trySharedSel(id), 0);
   } catch (err) {
     console.warn(err);
     state.loadedAt[id] = Date.now(); // back off until the layer's next refresh
@@ -600,7 +601,7 @@ function openNotes(title, html, key = null) {
   $('#notes').classList.add('open');
   $('#notes-body').scrollTop = 0;
 }
-function closeNotes() { $('#notes').classList.remove('open'); stopCameraMedia(); state.notesKey = null; if (state.selected) { state.selected = null; compose.forceMarkers = true; scheduleCompose(); } if (flightState.selected) { flightState.selected = null; flightState.follow = false; refreshLayer('aircraft', { soft: true }); } }
+function closeNotes() { $('#notes').classList.remove('open'); stopCameraMedia(); state.notesKey = null; setTimeout(writeHash, 0); if (state.selected) { state.selected = null; compose.forceMarkers = true; scheduleCompose(); } if (flightState.selected) { flightState.selected = null; flightState.follow = false; refreshLayer('aircraft', { soft: true }); } }
 const isOpen = (key) => state.notesKey === key && $('#notes').classList.contains('open');
 const linksHtml = (links) => (links?.length ? `<div class="links">${links.filter((l) => l.url).map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}</a>`).join('')}</div>` : '');
 const rowsHtml = (rows) => (rows?.length ? `<dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : '');
@@ -621,9 +622,11 @@ function select(ref) {
     ${linksHtml(c.links)}
     ${c.probe ? `<h4>Here, right now</h4>${probeHtml(c.probe[0], c.probe[1])}` : ''}
     <h4>About this layer</h4><p>${esc(l.learn.what)}</p>
-    <button class="btn ghost" data-learn-more="${l.id}">How it is measured, and something to try</button>`, key);
+    <div class="row"><button class="btn ghost" data-learn-more="${l.id}">How it is measured, and something to try</button><button class="btn ghost" data-share="1">Copy a link to this</button></div>`, key);
+  writeHash();
   if (c.probe) fillProbe(c.probe[0], c.probe[1]);
   if (c.wiki) wikiCard(c.wiki, key);
+  if (ref.layer === 'airports' && state.data.aircraft) runAction('airport-board');
 }
 // Wikipedia summary + photo for named things (only exact article matches, never disambiguation pages).
 async function wikiCard(title, key) {
@@ -633,9 +636,32 @@ async function wikiCard(title, key) {
     $('#sel-wiki').innerHTML = `<figure class="wiki">${w.thumbnail ? `<img src="${esc(w.thumbnail.source)}" alt="" loading="lazy" />` : ''}<figcaption>${esc(w.extract)} <a href="${esc(w.content_urls?.desktop?.page)}" target="_blank" rel="noopener">Wikipedia</a></figcaption></figure>`;
   } catch { /* no article, no card */ }
 }
+/** Arrivals and departures right now, worked out from live aircraft around an airport. */
+function airportBoard(ap) {
+  const ac = state.data.aircraft?.ac;
+  if (!ac?.length) return `<p class="muted">Turn on Live flights to see arrivals and departures here. <button class="btn ghost" data-enable-flights="1">Turn on Live flights</button></p>`;
+  const arr = []; const dep = []; const ground = []; const over = [];
+  for (const a of ac) {
+    const km = astro.haversineKm(ap.lat, ap.lng, a.lat, a.lng); if (km > 90) continue;
+    if (a.ground || (a.altFt < 400 + ap.elev && km < 6)) { if (km < 6) ground.push([a, km]); continue; }
+    const toAp = astro.bearingDeg(a.lat, a.lng, ap.lat, ap.lng); const diff = Math.abs(((a.trk - toAp + 540) % 360) - 180);
+    if (a.altFt > 15000) { if (km < 40) over.push([a, km]); continue; }
+    if (diff < 50 && (a.vs == null || a.vs < 300)) arr.push([a, km]); else if (diff > 110 && (a.vs == null || a.vs > -300)) dep.push([a, km]); else over.push([a, km]);
+  }
+  const row = ([a, km], extra) => `<button class="tour-card" data-flight="${esc(a.id)}"><b>${esc(a.call || a.id.toUpperCase())}${a.type ? ` · ${esc(a.type)}` : ''}</b><span>${extra}</span></button>`;
+  const eta = (a, km) => (a.kt ? Math.max(1, Math.round((km / (a.kt * 1.852)) * 60)) : null);
+  arr.sort((x, y) => x[1] - y[1]); dep.sort((x, y) => x[1] - y[1]);
+  const list = (title, rows, fmt) => `<h4>${title} <small class="muted">${rows.length}</small></h4>${rows.length ? rows.slice(0, 8).map((r) => row(r, fmt(r))).join('') : '<p class="muted">None right now.</p>'}`;
+  return `<div class="deck">${list('Arriving', arr, ([a, km]) => `${Math.round(km)} km out · ${Math.round(a.altFt).toLocaleString()} ft${eta(a, km) ? ` · lands in about ${eta(a, km)} min` : ''}`)}
+    ${list('Departing', dep, ([a, km]) => `${Math.round(km)} km away · climbing through ${Math.round(a.altFt).toLocaleString()} ft`)}
+    ${list('On the ground', ground, ([a]) => (a.kt > 5 ? `taxiing at ${Math.round(a.kt)} kt` : 'parked or holding'))}
+    ${over.length ? `<p class="muted">${over.length} more aircraft within 90 km are passing overhead or manoeuvring.</p>` : ''}
+    <p class="muted">Worked out from each plane’s heading, height and climb rate relative to the airport${state.data.aircraft.src?.includes('snapshot') ? ', using the 10-minute snapshot moved forward in time, so treat it as an estimate' : ''}.</p></div>`;
+}
 async function runAction(kind) {
   const ref = state.selected; const out = $('#sel-action');
   if (kind === 'ride') return extras?.ride(true);
+  if (kind === 'airport-board' && ref?.d) { if (out) out.innerHTML = airportBoard(ref.d); return; }
   if (kind === 'orbit' && ref?.d?.sat) { orbitOf.sat = ref.d.sat; orbitOf.snapshot = ref.d.snapshot; toggleLayer('satellites', true); refreshLayer('satellites', { soft: true }); if (out) out.innerHTML = '<p class="muted">Orbit drawn in violet — one full revolution from now.</p>'; }
   if (kind === 'passes' && ref?.d?.sat) {
     if (ref.d.snapshot) { out.innerHTML = '<p class="err">Pass predictions need live orbital elements, and CelesTrak is unreachable right now.</p>'; return; }
@@ -702,6 +728,8 @@ $('#notes-body').addEventListener('click', (e) => {
   if (t.dataset.fly) { const [a, b, c] = t.dataset.fly.split(',').map(Number); fly(a, b, c); }
   if (t.dataset.action) runAction(t.dataset.action);
   if (t.dataset.board) extras?.flightsBoard();
+  if (t.dataset.share) shareLink();
+  if (t.dataset.enableFlights) { toggleLayer('aircraft', true); renderLayerPanel(); setTimeout(() => { if (state.selected?.layer === 'airports') runAction('airport-board'); }, 5000); }
   if (t.dataset.deck) deckAction(t.dataset.deck, api);
   if (t.dataset.cam) { const c = state.data.cameras?.cams.find((x) => x.id === t.dataset.cam); if (c) { select({ layer: 'cameras', d: c }); fly(c.lat, c.lng, Math.min(state.pov.altitude, 0.02)); } }
   if (t.dataset.alprLive) layerById.alpr.fetchLive(viewOf(state.pov)).then((n) => { t.textContent = `Loaded ${n} from OpenStreetMap`; refreshLayer('alpr'); }).catch(() => { t.textContent = 'Overpass did not respond — try again shortly'; });
@@ -1170,11 +1198,37 @@ function readHash() {
   const m = h.match(/@(-?[\d.]+),(-?[\d.]+),([\d.]+)/);
   if (m) state.pov = { lat: +m[1], lng: +m[2], altitude: +m[3] }; else state.pov = { lat: 18, lng: Math.round(-new Date().getTimezoneOffset() / 4), altitude: 2.4 };
   const b = h.match(/[&]b=([a-z]+)/); if (b && (TILE[b[1]] || TEX[b[1]])) state.base = b[1];
-  const l = h.match(/[&]l=([\w,]*)/); if (l && !NEW_VERSION) state.on = new Set(l[1].split(',').filter((x) => layerById[x]));
+  const shared = /[&]s=1/.test(h); // a link someone shared: always honour its layers
+  const l = h.match(/[&]l=([\w,]*)/); if (l && (!NEW_VERSION || shared)) state.on = new Set(l[1].split(',').filter((x) => layerById[x]));
+  const sel = h.match(/[&]sel=([\w-]+)~([^&]+)/);
+  if (sel && layerById[sel[1]]) { state.pendingSel = { layer: sel[1], id: sel[2] }; state.on.add(sel[1]); }
 }
 function writeHash() {
-  const p = state.pov;
-  history.replaceState(null, '', `#@${p.lat.toFixed(3)},${p.lng.toFixed(3)},${p.altitude.toFixed(3)}&b=${state.base}&l=${[...state.on].join(',')}`);
+  const p = state.pov; const sel = currentSel();
+  history.replaceState(null, '', `#@${p.lat.toFixed(3)},${p.lng.toFixed(3)},${p.altitude.toFixed(3)}&b=${state.base}&l=${[...state.on].join(',')}${sel ? `&sel=${sel.layer}~${encodeURIComponent(sel.id)}` : ''}`);
+}
+// ---- shareable links to one item: #...&sel=layer~id
+const idOf = (d) => { const v = d?.id ?? d?.icao ?? d?.mmsi ?? d?.iata ?? d?.norad ?? d?.name ?? d?.title; return v == null ? null : String(v).slice(0, 80); };
+function currentSel() {
+  if (flightState.selected) return { layer: 'aircraft', id: flightState.selected };
+  const r = state.selected; const id = r && idOf(r.d); return id ? { layer: r.layer, id } : null;
+}
+function shareLink() {
+  writeHash();
+  const url = `${location.origin}${location.pathname}${location.hash}${location.hash.includes('s=1') ? '' : '&s=1'}`;
+  const done = () => toast('Link copied — it opens this view with the same layers and this item selected');
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(url).then(done, () => prompt('Copy this link', url)); else prompt('Copy this link', url);
+}
+/** After a layer loads, open the item a shared link pointed at. */
+function trySharedSel(id) {
+  const want = state.pendingSel; if (!want || want.layer !== id) return;
+  const ch = state.chan[id]; if (!ch) return;
+  const refs = [...(ch.points ?? []), ...(ch.pick ?? []), ...(ch.labels ?? [])].map((p) => p.ref).filter(Boolean);
+  const ref = refs.find((r) => idOf(r.d) === decodeURIComponent(want.id)) ?? (id === 'aircraft' ? (state.data.aircraft?.ac ?? []).filter((a) => a.id === want.id).map((a) => ({ layer: 'aircraft', d: a }))[0] : null);
+  if (!ref) return;
+  state.pendingSel = null; select(ref);
+  const d = ref.d; const lat = d.lat ?? d.geometry?.coordinates?.[1]; const lng = d.lng ?? d.geometry?.coordinates?.[0];
+  if (Number.isFinite(lat) && Number.isFinite(lng) && !/@/.test(location.hash.split('&')[0])) fly(lat, lng, Math.min(state.pov.altitude, 1.2), false);
 }
 
 // ------------------------------------------------------------------ clock, spin, screenshot, keys
@@ -1299,17 +1353,33 @@ $('#pal-open').addEventListener('click', () => extras.open());
 // Live countdowns in any open card
 setInterval(() => document.querySelectorAll('.countdown[data-net]').forEach((el) => { el.textContent = countdown(Number(el.dataset.net) - Date.now()); }), 1000);
 perf = installPerformance({ globe, $, toast: (m) => toast(m), onChange: () => { compose.forceMarkers = true; scheduleCompose(); } });
+// Planes glide between data refreshes (twice a second; once a second on the Fast setting).
+let glideAt = 0;
+setInterval(() => {
+  if (!state.on.has('aircraft') || document.hidden || !state.data.aircraft) return;
+  const now = performance.now(); if (perf.q.label === 'Fast' && now - glideAt < 950) return; glideAt = now;
+  const sel = glidePlanes(globe, state.pov.altitude);
+  if (sel && flightState.follow) followTo(sel.lat, sel.lng);
+}, 500);
 gov = installIdleGovernor(globe, {
   busy: () => controls.autoRotate || !!state.tour || flightState.follow || !!state.ride,
   animating: () => compose.animating || state.on.has('wind') || !clock.isLive(),
 });
 hud = installHud(api);
 if (state.look === 'hud') hud.show(true);
-if (NEW_VERSION) { setTimeout(whatsNew, 600); try { localStorage.setItem('terra-atlas-version', VERSION); } catch { /* private mode */ } }
+if (NEW_VERSION) { if (!state.pendingSel) setTimeout(whatsNew, 600); try { localStorage.setItem('terra-atlas-version', VERSION); } catch { /* private mode */ } }
 else if (!location.hash.includes('@') && !isMobile) welcome();
 function whatsNew() {
   const g = (n, c) => glyphSvg(n, c, 26);
-  openNotes(`What’s new in v${VERSION}`, `<h3>Every marker is now the shape of what it is</h3>
+  openNotes(`What’s new in v${VERSION}`, `<h3>Planes that glide, airport boards, flight search and shareable links</h3>
+    <div class="legend">
+      <span>${g('plane', '#8ecbff')}Planes now glide smoothly along their heading between updates instead of jumping every few seconds.</span>
+      <span>${g('pin', '#b7c8d6')}Click an airport for its <b>arrivals, departures and planes on the ground</b> right now, with landing estimates.</span>
+      <span>${g('eye', '#e3b55b')}Press <kbd>Ctrl</kbd>+<kbd>K</kbd> and type a callsign (BAW12), an airline prefix (UAL for every United flight), a registration or an aircraft type (A388).</span>
+      <span>${g('ix', '#7ed6c4')}<b>Copy a link</b> from any card: it opens the same view, layers and selected item for whoever you send it to.</span>
+    </div>
+    <p class="muted">Flights on the website come from a snapshot GitHub Actions takes every 10 minutes with an OpenSky API login, about 9,600 aircraft worldwide.</p>
+    <h4>From v1.8 — every marker is now the shape of what it is</h4>
     <p class="sub">No more identical bubbles: a wildfire is a flame, an earthquake a seismogram, a ship a ship. Bigger quakes and bigger power stations get bigger symbols.</p>
     <div class="legend">
       <span>${g('flame', '#ff8a4c')}Wildfire</span><span>${g('quake', '#f79d5c')}Earthquake</span><span>${g('storm', '#9fc3e6')}Tropical storm</span><span>${g('volcano', '#ff6f61')}Volcano</span>

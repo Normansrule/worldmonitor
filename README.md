@@ -23,6 +23,18 @@ Built on [World Monitor](https://github.com/koala73/worldmonitor) by Elie Habib.
 
 ---
 
+## 🛫 New in v1.9: gliding planes, airport boards, flight search and shareable links
+
+| | |
+|---|---|
+| **Planes glide** | Between data updates every airborne plane keeps moving along its heading at its ground speed, redrawn twice a second (once a second on the Fast setting). Planes no longer jump every few seconds, and a followed flight stays centred. |
+| **Airport arrivals and departures** | Click any airport to see what is arriving (with a landing estimate), departing and on the ground right now. It is worked out from each nearby plane’s heading, height and climb rate relative to the runway. Click a flight to open its seatback view. |
+| **Find any flight** | In the command palette (<kbd>Ctrl</kbd>+<kbd>K</kbd>), type a callsign (`BAW12`), an airline prefix (`UAL` lists every United flight in the air), a registration (`N123AB`) or a type (`A388`). |
+| **Shareable links** | Every card has a **Copy a link to this** button. The link reopens the same camera, base map and layers with that earthquake, launch, ship, airport or flight already selected. |
+| **Live data confirmed** | The `live-data` snapshot now uses an OpenSky API login and carries about 9,600 aircraft worldwide every 10 minutes, plus launches, disaster alerts and orbits. |
+
+---
+
 ## 🔥 New in v1.8: every marker is the shape of what it is
 
 <img src="site/docs-media/symbols-sheet.jpg" alt="Sheet of all 58 Terra Atlas map symbols: flame, seismogram, volcano, hurricane, flood, ships, tanker, ferry, sailboat, CCTV camera, plate reader, rocket, power-plant types and more" />

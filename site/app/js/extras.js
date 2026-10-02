@@ -31,7 +31,7 @@ export function installExtras(x) {
   // ------------------------------------------------------------ command palette
   const box = document.createElement('div');
   box.id = 'palette'; box.hidden = true; box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', 'Command palette');
-  box.innerHTML = `<div class="pal-card"><input id="pal-q" type="search" autocomplete="off" spellcheck="false" placeholder="Type a layer, place, tour or action…" aria-label="Search commands" />
+  box.innerHTML = `<div class="pal-card"><input id="pal-q" type="search" autocomplete="off" spellcheck="false" placeholder="Type a layer, place, flight (e.g. UAL, BAW12), tour or action…" aria-label="Search commands" />
     <ul id="pal-list" role="listbox"></ul><p class="pal-foot"><kbd>↑</kbd><kbd>↓</kbd> choose · <kbd>Enter</kbd> run · <kbd>Esc</kbd> close · <kbd>Ctrl</kbd>+<kbd>K</kbd> any time</p></div>`;
   document.body.appendChild(box);
   const input = box.querySelector('#pal-q'); const list = box.querySelector('#pal-list');
@@ -75,10 +75,28 @@ export function installExtras(x) {
   function render() {
     const q = input.value.trim().toLowerCase();
     shown = items.map((it) => [score(it, q), it]).filter(([s]) => s > -Infinity && (q || s >= 0)).sort((a, b) => b[0] - a[0]).slice(0, 60).map(([, it]) => it);
+    // Live flights: callsign (UAL123, or just UAL for every United flight), registration, aircraft type or ICAO address
+    const fl = flightMatches(q); if (fl.length) shown = (shown.length && score(shown[0], q) >= 10 ? [shown[0], ...fl, ...shown.slice(1)] : [...fl, ...shown]).slice(0, 60);
     sel = Math.min(sel, Math.max(0, shown.length - 1));
     list.innerHTML = shown.length ? shown.map((it, i) => `<li role="option" data-i="${i}" aria-selected="${i === sel}"><span class="pal-g">${esc(it.group)}</span><b>${esc(it.label)}</b>${it.hint ? `<small>${esc(it.hint)}</small>` : ''}</li>`).join('')
       : `<li class="pal-empty">Nothing matches. Press Enter to search the map for “${esc(input.value)}”.</li>`;
     list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+  }
+  function flightMatches(q) {
+    const ac = state.data.aircraft?.ac; if (!ac || q.length < 2 || !state.on.has('aircraft')) return [];
+    const Q = q.toUpperCase().replace(/\s+/g, ''); const out = [];
+    for (const a of ac) {
+      const call = (a.call ?? '').toUpperCase();
+      const hit = call.startsWith(Q) ? 3 : (a.reg ?? '').toUpperCase().replace('-', '').startsWith(Q.replace('-', '')) ? 2 : (a.type ?? '').toUpperCase() === Q ? 1 : a.id?.toUpperCase() === Q ? 2 : 0;
+      if (hit) out.push([hit, a]);
+      if (out.length > 400) break;
+    }
+    return out.sort((x, y) => y[0] - x[0] || (x[1].call ?? '').localeCompare(y[1].call ?? '')).slice(0, 12).map(([, a]) => ({
+      group: 'Flight', label: a.call || a.id.toUpperCase(),
+      hint: [a.type, a.reg, a.ground ? 'on the ground' : `${Math.round(a.altFt).toLocaleString()} ft`, a.kt ? `${Math.round(a.kt * 1.852)} km/h` : ''].filter(Boolean).join(' · '),
+      run: () => { x.layer('aircraft').open(a); globe.pointOfView({ lat: a.lat, lng: a.lng, altitude: Math.min(state.pov.altitude, 0.5) }, x.reduceMotion ? 0 : 1600); },
+      key: '',
+    }));
   }
   function open() {
     items = commands(); box.hidden = false; input.value = ''; sel = 0; render(); input.focus();

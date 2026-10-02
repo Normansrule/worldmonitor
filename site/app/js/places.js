@@ -59,7 +59,7 @@ export const airportsLayer = {
     return {
       title: a.name, sub: `${a.iata}${a.icao && a.icao !== a.iata ? ` / ${a.icao}` : ''} · ${[a.city, a.cc].filter(Boolean).join(', ')}`,
       rows: [['Elevation', `${a.elev.toLocaleString()} ft (${Math.round(a.elev / 3.281).toLocaleString()} m)`], ['Size', a.large ? 'Large airport' : 'Medium airport with scheduled flights'], ['Position', `${fmtLat(a.lat)}, ${fmtLng(a.lng)}`]],
-      wiki: a.name, probe: [a.lat, a.lng], actions: [['near-flights', 'Show flights around here']],
+      wiki: a.name, probe: [a.lat, a.lng], actions: [['airport-board', 'Arrivals and departures now'], ['near-flights', 'Zoom in on the traffic here']],
       links: [{ label: 'Live traffic on adsb.lol', url: `https://globe.adsb.lol/?lat=${a.lat}&lon=${a.lng}&zoom=10` }, { label: 'OurAirports', url: `https://ourairports.com/airports/${a.icao}/` }],
     };
   },
